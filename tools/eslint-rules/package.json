@@ -1,0 +1,16 @@
+{
+  "name": "@vault/eslint-rules",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "no-network-imports-outside-net.js",
+  "exports": {
+    "./no-network-imports-outside-net": "./no-network-imports-outside-net.js"
+  },
+  "scripts": {
+    "test": "node tests/no-network-imports-outside-net.test.js"
+  },
+  "devDependencies": {
+    "eslint": "^9.13.0"
+  }
+}
