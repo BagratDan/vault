@@ -1,0 +1,34 @@
+{
+  "name": "@vault/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "scripts": {
+    "build": "echo 'web build: scaffolded in Task 24 (vite build)' && exit 0",
+    "typecheck": "echo 'web typecheck: scaffolded in Task 24' && exit 0",
+    "test": "echo 'web test: scaffolded in Task 25' && exit 0",
+    "test:unit": "echo 'web test:unit: scaffolded in Task 25' && exit 0",
+    "dev": "echo 'web dev: scaffolded in Task 24' && exit 0"
+  },
+  "dependencies": {
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "@vault/domain": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "vite": "^5.4.0",
+    "tailwindcss": "^3.4.0",
+    "postcss": "^8.4.0",
+    "autoprefixer": "^10.4.0",
+    "vitest": "^2.1.0",
+    "@testing-library/react": "^16.0.0",
+    "@testing-library/jest-dom": "^6.5.0",
+    "jsdom": "^25.0.0"
+  }
+}

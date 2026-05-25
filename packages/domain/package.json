@@ -1,0 +1,23 @@
+{
+  "name": "@vault/domain",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run --dir tests",
+    "test:int": "echo 'no integration tests in domain'"
+  },
+  "dependencies": {
+    "ulid": "^2.3.0",
+    "zod": "^4.3.0"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.0"
+  }
+}
