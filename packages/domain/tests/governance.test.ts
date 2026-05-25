@@ -46,10 +46,10 @@ describe("governance schemas", () => {
     const r = {
       ...base,
       vaultId: newUlid(),
-      targetPeerId: "f".repeat(64),
-      issuedBy: "g".repeat(64),
+      targetPeerId: "1".repeat(64),
+      issuedBy: "2".repeat(64),
       effectiveAt: "2026-05-26T10:00:00.000Z",
-      sig: "h".repeat(128),
+      sig: "3".repeat(128),
     };
     expect(revocationShape.safeParse(r).success).toBe(true);
   });
@@ -57,8 +57,8 @@ describe("governance schemas", () => {
   it("consentEventShape: discriminated by kind", () => {
     const req = {
       ...base,
-      requesterPeerId: "i".repeat(64),
-      ownerPeerId: "j".repeat(64),
+      requesterPeerId: "4".repeat(64),
+      ownerPeerId: "5".repeat(64),
       resourceId: newUlid(),
       kind: "request" as const,
     };
@@ -67,7 +67,7 @@ describe("governance schemas", () => {
     const approve = {
       ...req,
       kind: "approve-snippet" as const,
-      payloadHash: "sha256:" + "k".repeat(64),
+      payloadHash: "sha256:" + "6".repeat(64),
       byteCount: 1024,
     };
     expect(consentEventShape.safeParse(approve).success).toBe(true);

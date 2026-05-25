@@ -1,7 +1,5 @@
 import { z } from "zod";
-import { baseRecordShape, ulidShape } from "./base.js";
-
-const govPeerIdShape = z.string().length(64); // public key identifier (64-char)
+import { baseRecordShape, peerIdShape, ulidShape } from "./base.js";
 
 export const consentEventKindShape = z.enum([
   "request",
@@ -14,11 +12,11 @@ export const consentEventKindShape = z.enum([
 export type ConsentEventKind = z.infer<typeof consentEventKindShape>;
 
 export const consentEventShape = baseRecordShape.extend({
-  requesterPeerId: govPeerIdShape,
-  ownerPeerId: govPeerIdShape,
+  requesterPeerId: peerIdShape,
+  ownerPeerId: peerIdShape,
   resourceId: ulidShape,
   kind: consentEventKindShape,
-  payloadHash: z.string().regex(/^sha256:.{64}$/).optional(),
+  payloadHash: z.string().regex(/^sha256:[0-9a-f]{64}$/).optional(),
   byteCount: z.number().int().nonnegative().optional(),
   ratePolicy: z.enum(["normal", "warned", "paused"]).optional(),
 });

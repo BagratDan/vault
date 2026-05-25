@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { baseRecordShape, peerIdShape, ulidShape, isoShape } from "./base.js";
 
-const sigShape = z.string().length(128); // Ed25519 sig (hex or base64url)
+const sigShape = z.string().regex(/^[0-9a-f]{128}$/); // Ed25519 sig hex (64 bytes encoded)
 export { sigShape };
 
 export const inviteShape = baseRecordShape.extend({
