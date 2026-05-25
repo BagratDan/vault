@@ -9,3 +9,7 @@ export * from "./event.js";
 export * from "./task.js";
 export * from "./external-ref.js";
 export * from "./relationship.js";
+export * from "./member.js";
+export * from "./invite.js";
+export * from "./revocation.js";
+export * from "./consent-event.js";
