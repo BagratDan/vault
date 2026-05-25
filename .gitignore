@@ -1,0 +1,33 @@
+# Private chat transcripts — not for the public repo.
+# These contain raw Claude Code session JSONL and the rendered conversation
+# that produced the design spec. The spec itself is the canonical artifact.
+/*.jsonl
+/qvac-chat-transcript.md
+
+# Node / pnpm
+node_modules/
+dist/
+.pnpm-store/
+*.tsbuildinfo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+
+# Local data — created at runtime by `vault start`
+/.data/
+/.vault/
+
+# Test artifacts
+coverage/
+playwright-report/
+test-results/
+
+# Env
+.env
+.env.local
+.env.*.local
