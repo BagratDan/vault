@@ -35,9 +35,14 @@ export function InviteTokenDisplay({ token, expiresAt, onDismiss }: InviteTokenD
         <button
           type="button"
           onClick={async () => {
-            await navigator.clipboard.writeText(token);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
+            try {
+              await navigator.clipboard.writeText(token);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1500);
+            } catch {
+              // Clipboard API unavailable (non-secure context, denied permissions).
+              // User can still select the textarea and copy manually.
+            }
           }}
           className="mt-3 rounded-lg bg-cyan-500 px-4 py-2 text-sm font-medium text-slate-900 hover:bg-cyan-400"
         >

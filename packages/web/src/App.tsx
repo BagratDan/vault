@@ -85,6 +85,9 @@ export function App() {
       if (m.kind === "vault.status") {
         setVaultStateView(m.state);
         if (m.selfPeerId) setSelfPeerId(m.selfPeerId);
+        if (m.state === "admin" || m.state === "member") {
+          ws.send({ kind: "peer.list" });
+        }
       } else if (m.kind === "vault.created" || m.kind === "vault.joined") {
         ws.send({ kind: "vault.status" });
         ws.send({ kind: "peer.list" });
@@ -130,7 +133,6 @@ export function App() {
         setPlaying(false);
       }
     });
-    ws.send({ kind: "peer.list" });
     return unsubscribe;
   }, [ws]);
 
