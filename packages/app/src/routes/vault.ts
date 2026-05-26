@@ -11,6 +11,7 @@ import {
   openAutobeeStore,
   type OpenedAutobeeStore,
   type SwarmTransport,
+  type FolderLocal,
 } from "@vault/sync";
 import type { VaultFs } from "../vault-fs.js";
 import {
@@ -23,6 +24,7 @@ export interface VaultRuntime {
   store: OpenedAutobeeStore | null;
   swarm: SwarmTransport | null;
   state: VaultState | null;
+  folderLocal: FolderLocal | null;
   /** Called by routes after vault create/join so start.ts can join the swarm. */
   onActivated?: (state: VaultState) => Promise<void>;
 }

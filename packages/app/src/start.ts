@@ -63,7 +63,12 @@ export async function startVault(): Promise<VaultHandle> {
 
   const rateLimiter = new RateLimiter();
 
-  const runtime: VaultRuntime = { store: null, swarm: null, state: null };
+  const runtime: VaultRuntime = {
+    store: null,
+    swarm: null,
+    state: null,
+    folderLocal: null,
+  };
 
   let consentState: ConsentState | null = null;
   let audit: AuditLog | null = null;
@@ -351,6 +356,8 @@ export async function startVault(): Promise<VaultHandle> {
     getAudit: () => audit,
     selfDisplayName: () =>
       runtime.state?.displayName ?? identity.peerId.slice(0, 8),
+    getFolderLocal: () => runtime.folderLocal,
+    broadcast: (msg) => broadcastToClients(msg),
   };
 
   const router = makeRouter(bridgeDeps);

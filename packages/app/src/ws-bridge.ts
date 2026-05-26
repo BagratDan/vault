@@ -13,6 +13,7 @@ import {
   type Repo,
   type Indexes,
   type Scope,
+  type FolderLocal,
 } from "@vault/sync";
 import type { ConsentEvent } from "@vault/domain";
 import { captureText, captureAudio } from "./routes/capture.js";
@@ -27,6 +28,7 @@ import {
   type ConsentDeps,
 } from "./routes/consent.js";
 import type { ConsentState } from "./consent-state.js";
+import * as folderRoutes from "./routes/folder.js";
 import { complete, type ChatMessage } from "@vault/ai";
 import { newUlid, type Ulid } from "@vault/domain";
 
@@ -58,6 +60,8 @@ export interface BridgeDeps {
   getConsentState: () => ConsentState | null;
   getAudit: () => AuditLog | null;
   selfDisplayName: () => string;
+  getFolderLocal: () => FolderLocal | null;
+  broadcast: (msg: unknown) => void;
 }
 
 export interface Conn {
@@ -260,6 +264,8 @@ async function routeMessage(
             query: msg.query,
             k: msg.k,
             ...(filters ? { filters } : {}),
+            // Task 17 adds folderIds support to runSearch; the schema already
+            // carries msg.folderIds, but SearchRouteInput doesn't accept it yet.
           }
         );
         const requestId = newUlid();
@@ -313,6 +319,7 @@ async function routeMessage(
           createdAt: m.createdAt,
           ownerPeerId: m.ownerPeerId,
           confidence: m.confidence,
+          folderId: m.folderId,
         }));
         return { kind: "memory.list", memories };
       });
@@ -464,6 +471,100 @@ async function routeMessage(
         };
         await repo.putMemory(updated);
         return { kind: "capture.ack", memoryId: memory.id };
+      });
+    }
+
+    // ── Folders ──────────────────────────────────────────────────────
+    case "folder.add": {
+      return requireVaultActive(deps, async () => {
+        const fl = deps.getFolderLocal();
+        if (!fl || !deps.runtime.store) {
+          return { kind: "error", code: "no-vault", message: "vault not active" };
+        }
+        const r = await folderRoutes.folderAdd(
+          {
+            fs: deps.fs,
+            folderLocal: fl,
+            getRepo: deps.getRepo,
+            pool: deps.pool,
+            ownerPeerId: deps.identity.peerId,
+            storeSecretKey: deps.runtime.store.secretKey,
+            broadcast: deps.broadcast,
+          },
+          { path: msg.path, displayName: msg.displayName, visibility: msg.visibility }
+        );
+        return { kind: "folder.added", folderId: r.folderId, displayName: r.displayName };
+      });
+    }
+    case "folder.list": {
+      return requireVaultActive(deps, async () => {
+        const fl = deps.getFolderLocal();
+        if (!fl) return { kind: "error", code: "no-vault", message: "vault not active" };
+        const r = await folderRoutes.folderList({
+          fs: deps.fs,
+          folderLocal: fl,
+          getRepo: deps.getRepo,
+          pool: deps.pool,
+          ownerPeerId: deps.identity.peerId,
+          storeSecretKey: deps.runtime.store?.secretKey ?? new Uint8Array(64),
+          broadcast: deps.broadcast,
+        });
+        return { kind: "folder.list", folders: r.folders };
+      });
+    }
+    case "folder.update": {
+      return requireVaultActive(deps, async () => {
+        const fl = deps.getFolderLocal();
+        if (!fl || !deps.runtime.store) {
+          return { kind: "error", code: "no-vault", message: "vault not active" };
+        }
+        const r = await folderRoutes.folderUpdate(
+          {
+            fs: deps.fs, folderLocal: fl, getRepo: deps.getRepo, pool: deps.pool,
+            ownerPeerId: deps.identity.peerId, storeSecretKey: deps.runtime.store.secretKey,
+            broadcast: deps.broadcast,
+          },
+          {
+            folderId: msg.folderId,
+            ...(msg.visibility ? { visibility: msg.visibility } : {}),
+            ...(msg.displayName ? { displayName: msg.displayName } : {}),
+          }
+        );
+        return { kind: "folder.updated", folderId: r.folderId };
+      });
+    }
+    case "folder.delete": {
+      return requireVaultActive(deps, async () => {
+        const fl = deps.getFolderLocal();
+        if (!fl || !deps.runtime.store) {
+          return { kind: "error", code: "no-vault", message: "vault not active" };
+        }
+        const r = await folderRoutes.folderDelete(
+          {
+            fs: deps.fs, folderLocal: fl, getRepo: deps.getRepo, pool: deps.pool,
+            ownerPeerId: deps.identity.peerId, storeSecretKey: deps.runtime.store.secretKey,
+            broadcast: deps.broadcast,
+          },
+          { folderId: msg.folderId }
+        );
+        return { kind: "folder.deleted", folderId: r.folderId };
+      });
+    }
+    case "folder.rescan": {
+      return requireVaultActive(deps, async () => {
+        const fl = deps.getFolderLocal();
+        if (!fl || !deps.runtime.store) {
+          return { kind: "error", code: "no-vault", message: "vault not active" };
+        }
+        await folderRoutes.folderRescan(
+          {
+            fs: deps.fs, folderLocal: fl, getRepo: deps.getRepo, pool: deps.pool,
+            ownerPeerId: deps.identity.peerId, storeSecretKey: deps.runtime.store.secretKey,
+            broadcast: deps.broadcast,
+          },
+          { folderId: msg.folderId }
+        );
+        return { kind: "folder.ingest-progress", folderId: msg.folderId, current: 0, total: 0, phase: "scanning" };
       });
     }
   }
