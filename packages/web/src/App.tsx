@@ -6,12 +6,16 @@ import { ResultCard } from "./components/ResultCard.js";
 import { AnswerCard } from "./components/AnswerCard.js";
 import { FilterControls, type Filters } from "./components/FilterControls.js";
 import { ModelStatus } from "./components/ModelStatus.js";
+import { VaultSetup } from "./components/VaultSetup.js";
 import type { Hit, Citation, ClientMessage } from "./types.js";
 
 export function App() {
   const [ws, setWs] = useState<WsClient | null>(null);
   const [connState, setConnState] = useState<"idle" | "loading" | "ready" | "error">(
     "idle"
+  );
+  const [vaultStateView, setVaultStateView] = useState<"unknown" | "no-vault" | "admin" | "member">(
+    "unknown"
   );
   const [hits, setHits] = useState<Hit[]>([]);
   const [answer, setAnswer] = useState<{ text: string; citations: Citation[] } | null>(
@@ -41,6 +45,7 @@ export function App() {
         const client = createWsClient({
           url: `ws://${window.location.host}/ws?token=${encodeURIComponent(body.token)}`,
         });
+        client.send({ kind: "vault.status" });
         setWs(client);
         setConnState("ready");
       } catch {
@@ -70,7 +75,11 @@ export function App() {
       audioQueue.current.el = el;
     }
     return ws.onMessage((m) => {
-      if (m.kind === "search.hits") {
+      if (m.kind === "vault.status") {
+        setVaultStateView(m.state);
+      } else if (m.kind === "vault.created" || m.kind === "vault.joined") {
+        ws.send({ kind: "vault.status" });
+      } else if (m.kind === "search.hits") {
         setHits(m.hits);
       } else if (m.kind === "capture.ack") {
         setBanner(
@@ -103,6 +112,31 @@ export function App() {
   }, [ws]);
 
   const send = (msg: ClientMessage) => ws?.send(msg);
+
+  if (connState !== "ready") {
+    return (
+      <main className="mx-auto flex max-w-3xl flex-col items-center justify-center p-10">
+        <ModelStatus state={connState} />
+      </main>
+    );
+  }
+
+  if (vaultStateView === "unknown") {
+    return (
+      <main className="mx-auto flex max-w-3xl flex-col items-center justify-center p-10">
+        <p className="text-sm text-slate-400">Loading vault status…</p>
+      </main>
+    );
+  }
+
+  if (vaultStateView === "no-vault") {
+    return (
+      <VaultSetup
+        onCreate={(displayName) => send({ kind: "vault.create", displayName })}
+        onJoin={(token, displayName) => send({ kind: "vault.invite-accept", token, displayName })}
+      />
+    );
+  }
 
   return (
     <main className="mx-auto max-w-3xl space-y-5 p-6">

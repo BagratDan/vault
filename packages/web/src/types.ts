@@ -17,7 +17,12 @@ export type ClientMessage =
       };
     }
   | { kind: "memory.get"; memoryId: string }
-  | { kind: "tts.play"; text: string; requestId: string };
+  | { kind: "tts.play"; text: string; requestId: string }
+  | { kind: "vault.status" }
+  | { kind: "vault.create"; displayName: string }
+  | { kind: "vault.invite-create"; placeholderDisplayName?: string; expiresIn?: string }
+  | { kind: "vault.invite-accept"; token: string; displayName: string }
+  | { kind: "peer.list" };
 
 export interface Hit {
   memoryId: string;
@@ -39,4 +44,11 @@ export type ServerMessage =
   | { kind: "answer.done"; requestId: string; citations: Citation[] }
   | { kind: "tts.chunk"; requestId: string; audioBase64: string }
   | { kind: "tts.done"; requestId: string }
-  | { kind: "error"; requestId?: string; code: string; message: string };
+  | { kind: "error"; requestId?: string; code: string; message: string }
+  | { kind: "vault.status"; state: "no-vault" | "admin" | "member"; vaultId?: string; vaultName?: string; selfPeerId?: string }
+  | { kind: "vault.created"; vaultId: string; peerId: string }
+  | { kind: "vault.joined"; vaultId: string; peerId: string }
+  | { kind: "invite.token"; token: string; expiresAt: string }
+  | { kind: "peer.list"; peers: Array<{ peerId: string; displayName: string; role: "admin" | "member" }> }
+  | { kind: "peer.connected"; peer: { peerId: string; displayName: string } }
+  | { kind: "peer.disconnected"; peerId: string };
