@@ -1,0 +1,19 @@
+{
+  "name": "@vault/e2e",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:playwright": "playwright test"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "@types/ws": "^8.5.12",
+    "tsx": "^4.19.0",
+    "vitest": "^2.1.0"
+  }
+}

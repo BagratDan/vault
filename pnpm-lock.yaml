@@ -27,11 +27,30 @@ importers:
         specifier: ^5.5.0
         version: 5.9.3
 
+  e2e:
+    dependencies:
+      ws:
+        specifier: ^8.18.0
+        version: 8.21.0
+    devDependencies:
+      '@playwright/test':
+        specifier: ^1.48.0
+        version: 1.60.0
+      '@types/ws':
+        specifier: ^8.5.12
+        version: 8.18.1
+      tsx:
+        specifier: ^4.19.0
+        version: 4.22.3
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@22.19.19)(jsdom@25.0.1)
+
   packages/ai:
     dependencies:
       '@qvac/sdk':
         specifier: ^0.11.0
-        version: 0.11.0(bead3mn32ll65uvd4ypiskpms4)
+        version: 0.11.0(d4qjmzqspy7iu3nk6jivofynla)
       '@vault/domain':
         specifier: workspace:*
         version: link:../domain
@@ -104,7 +123,7 @@ importers:
     dependencies:
       '@qvac/sdk':
         specifier: ^0.11.0
-        version: 0.11.0(bead3mn32ll65uvd4ypiskpms4)
+        version: 0.11.0(d4qjmzqspy7iu3nk6jivofynla)
       '@vault/ai':
         specifier: workspace:*
         version: link:../ai
@@ -699,6 +718,11 @@ packages:
   '@nodelib/fs.walk@1.2.8':
     resolution: {integrity: sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==}
     engines: {node: '>= 8'}
+
+  '@playwright/test@1.60.0':
+    resolution: {integrity: sha512-O71yZIbAh/PxDMNGns37GHBIfrVkEVyn+AXyIa5dOTfb4/xNvRWV+Vv/NMbNCtODB/pO7vLlF2OTmMVLhmr7Ag==}
+    engines: {node: '>=18'}
+    hasBin: true
 
   '@qvac/decoder-audio@0.3.8':
     resolution: {integrity: sha512-NQIgXTpKJbcXAB8zoOKMEjHS7DpmdxIocqqXwNLqGEE6v0DmxuiQHWP6e8SSzmaYBjC5oq0Dr522v5FgZ7iytQ==}
@@ -1934,6 +1958,11 @@ packages:
   fs-native-extensions@1.5.0:
     resolution: {integrity: sha512-nuZLFm9mGCxvyi7Llww/J4OyifKCS21nEUTAmnlTZp3FObPOvA32aCedCmt4Z+8yk+caqfClNaSCfn/P7T7FLQ==}
 
+  fsevents@2.3.2:
+    resolution: {integrity: sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA==}
+    engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
+    os: [darwin]
+
   fsevents@2.3.3:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
@@ -2344,6 +2373,16 @@ packages:
   pirates@4.0.7:
     resolution: {integrity: sha512-TfySrs/5nm8fQJDcBDuUng3VOUKsd7S+zqvbOTiGXHfxX4wK31ard+hoNuvkicM/2YFzlpDgABOevKSsB4G/FA==}
     engines: {node: '>= 6'}
+
+  playwright-core@1.60.0:
+    resolution: {integrity: sha512-9bW6zvX/m0lEbgTKJ6YppOKx8H3VOPBMOCFh2irXFOT4BbHgrx5hPjwJYLT40Lu+4qtD36qKc/Hn56StUW57IA==}
+    engines: {node: '>=18'}
+    hasBin: true
+
+  playwright@1.60.0:
+    resolution: {integrity: sha512-hheHdokM8cdqCb0lcE3s+zT4t4W+vvjpGxsZlDnikarzx8tSzMebh3UiFtgqwFwnTnjYQcsyMF8ei2mCO/tpeA==}
+    engines: {node: '>=18'}
+    hasBin: true
 
   postcss-import@15.1.0:
     resolution: {integrity: sha512-hpr+J05B2FVYUAXHeK1YyI267J/dDDhMU6B6civm8hSY1jYJnBXxzKDKDswzJmtLHryrjhnDjqqp/49t8FALew==}
@@ -3302,6 +3341,10 @@ snapshots:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.1
 
+  '@playwright/test@1.60.0':
+    dependencies:
+      playwright: 1.60.0
+
   '@qvac/decoder-audio@0.3.8(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))':
     dependencies:
       '@qvac/error': 0.1.1
@@ -3452,7 +3495,7 @@ snapshots:
     dependencies:
       bare-events: 2.4.2
 
-  '@qvac/sdk@0.11.0(bead3mn32ll65uvd4ypiskpms4)':
+  '@qvac/sdk@0.11.0(d4qjmzqspy7iu3nk6jivofynla)':
     dependencies:
       '@qvac/decoder-audio': 0.3.8(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))
       '@qvac/diffusion-cpp': 0.7.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)
@@ -3484,7 +3527,7 @@ snapshots:
       bare-rpc: 1.3.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))
       bare-runtime: 1.28.5(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3)
       bare-stream: 2.13.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))
-      bare-subprocess: 5.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)
+      bare-subprocess: 6.0.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)
       bare-zlib: 1.3.3(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))
       corestore: 7.9.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))(bare-url@2.4.3)
       events: 3.3.0
@@ -4949,6 +4992,9 @@ snapshots:
     transitivePeerDependencies:
       - bare-url
 
+  fsevents@2.3.2:
+    optional: true
+
   fsevents@2.3.3:
     optional: true
 
@@ -5570,6 +5616,14 @@ snapshots:
   pify@2.3.0: {}
 
   pirates@4.0.7: {}
+
+  playwright-core@1.60.0: {}
+
+  playwright@1.60.0:
+    dependencies:
+      playwright-core: 1.60.0
+    optionalDependencies:
+      fsevents: 2.3.2
 
   postcss-import@15.1.0(postcss@8.5.15):
     dependencies:
