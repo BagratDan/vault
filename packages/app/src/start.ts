@@ -14,6 +14,7 @@ import { VaultFs } from "./vault-fs.js";
 import { loadOrCreateIdentity } from "./identity.js";
 import { readVaultState, type VaultState } from "./vault-state.js";
 import { makeRouter, type BridgeDeps } from "./ws-bridge.js";
+import { handleSearchProbe } from "./routes/search.js";
 import type { VaultRuntime } from "./routes/vault.js";
 
 export interface VaultHandle {
@@ -54,12 +55,16 @@ export async function startVault(): Promise<VaultHandle> {
 
   const runtime: VaultRuntime = { store: null, swarm: null, state: null };
 
-  // Placeholders that get rewired once we know the swarm + broadcast sink.
-  let rpcHandler: (
-    method: string,
-    params: unknown
-  ) => Promise<unknown> = async () => {
-    throw new Error("rpc handler not yet wired");
+  // The RPC handler dispatches inbound RPC messages from connected peers.
+  // Currently: search.probe (federated search). Plan 3 will add consent.request.
+  const rpcHandler = async (method: string, params: unknown): Promise<unknown> => {
+    if (method === "search.probe") {
+      return handleSearchProbe(
+        { pool, workspace, selfPeerId: identity.peerId },
+        params as { v: 1; requestId: string; query: string; k: number }
+      );
+    }
+    throw new Error(`unknown rpc method: ${method}`);
   };
   let broadcastToClients: (msg: unknown) => void = () => undefined;
 

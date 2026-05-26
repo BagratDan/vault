@@ -201,6 +201,8 @@ async function routeMessage(
           {
             pool: deps.pool,
             workspace: deps.workspace,
+            swarm: deps.runtime.swarm,
+            selfPeerId: deps.identity.peerId,
           },
           {
             query: msg.query,
