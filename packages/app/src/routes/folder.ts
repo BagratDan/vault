@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import {
   newUlid,
+  asUlid,
   type Folder,
   type FolderPublic,
   type FolderVisibility,
@@ -18,7 +19,8 @@ import {
   scanFolder,
   type ScannedFile,
 } from "@vault/ingest";
-import type { ModelPool } from "@vault/ai";
+import { ensureEmbedModel, embedText, type ModelPool } from "@vault/ai";
+import type { Workspace } from "@vault/retrieval";
 import type { VaultFs } from "../vault-fs.js";
 
 export interface FolderRoutesDeps {
@@ -29,6 +31,10 @@ export interface FolderRoutesDeps {
   ownerPeerId: string;
   storeSecretKey: Uint8Array;
   broadcast: (msg: unknown) => void;
+  /** @qvac/rag search workspace — ingested memories must be embedded here. */
+  workspace: Workspace;
+  /** Awaits autobee apply() so locally-appended writes become visible. */
+  flushStore: () => Promise<void>;
 }
 
 export async function folderAdd(
@@ -77,6 +83,9 @@ export async function folderAdd(
   // Only public folders write to autobee; private folders stay local.
   if (input.visibility === "public") {
     await deps.getRepo().putFolderPublic(publicRecord);
+    // Flush so the appended folder record is visible to a subsequent
+    // folder.list (autobee appends aren't in the view until apply() runs).
+    await deps.flushStore();
   }
   void runIngest(deps, fullRecord);
   return { folderId, displayName: input.displayName };
@@ -154,11 +163,38 @@ async function runIngest(deps: FolderRoutesDeps, folder: Folder): Promise<void> 
         folderId: folder.id,
       };
       await deps.getRepo().putMemoryByVisibility(memory, folder.visibility);
+      // Embed into the search workspace so the memory is findable. Without
+      // this the memory is stored but never indexed → search returns nothing.
+      try {
+        const embedModelId = await ensureEmbedModel(deps.pool);
+        const vector = await embedText(deps.pool, memory.body);
+        await deps.workspace.ingest({
+          memoryId: asUlid(memory.id),
+          body: memory.body,
+          tags: memory.tags,
+          embedding: vector,
+          embeddingModelId: embedModelId,
+          metadata: {
+            ownerPeerId: deps.ownerPeerId,
+            createdAt: memory.createdAt,
+          },
+        });
+      } catch (err) {
+        // Embedding is best-effort per file; a failure here shouldn't abort
+        // the whole folder ingest. The memory is still stored; it just won't
+        // be searchable until a re-scan.
+        // eslint-disable-next-line no-console
+        console.warn("[vault] folder ingest: embed failed for", memory.id, err);
+      }
       ingested++;
     } catch {
       errors++;
     }
   }
+  // Flush once after the loop so all the public memories (and their folder
+  // record) are visible to folder.list and search dedup reads. One flush at
+  // the end is enough — flushing per-file would be slow.
+  await deps.flushStore();
   deps.broadcast({ kind: "folder.ingest-done", folderId: folder.id, ingested, skipped, errors });
 }
 
@@ -265,6 +301,7 @@ export async function folderUpdate(
     };
     const publicRecord: FolderPublic = { ...publicBody, sig: signCanonical(publicBody, deps.storeSecretKey) };
     await deps.getRepo().putFolderPublic(publicRecord);
+    await deps.flushStore();
   }
   deps.broadcast({ kind: "folder.updated", folderId: updated.id });
   return { folderId: updated.id };
@@ -283,6 +320,7 @@ export async function folderDelete(
   for (const m of memories) {
     await deps.getRepo().markMemoryDeleted(m.id);
   }
+  await deps.flushStore();
   deps.broadcast({ kind: "folder.deleted", folderId: input.folderId });
   return { folderId: input.folderId };
 }

@@ -498,6 +498,8 @@ async function routeMessage(
             ownerPeerId: deps.identity.peerId,
             storeSecretKey: deps.runtime.store.secretKey,
             broadcast: deps.broadcast,
+            workspace: deps.workspace,
+            flushStore: async () => { if (deps.runtime.store) await deps.runtime.store.flush(); },
           },
           { path: msg.path, displayName: msg.displayName, visibility: msg.visibility }
         );
@@ -516,6 +518,8 @@ async function routeMessage(
           ownerPeerId: deps.identity.peerId,
           storeSecretKey: deps.runtime.store?.secretKey ?? new Uint8Array(64),
           broadcast: deps.broadcast,
+          workspace: deps.workspace,
+          flushStore: async () => { if (deps.runtime.store) await deps.runtime.store.flush(); },
         });
         return { kind: "folder.list", folders: r.folders };
       });
@@ -531,6 +535,8 @@ async function routeMessage(
             fs: deps.fs, folderLocal: fl, getRepo: deps.getRepo, pool: deps.pool,
             ownerPeerId: deps.identity.peerId, storeSecretKey: deps.runtime.store.secretKey,
             broadcast: deps.broadcast,
+            workspace: deps.workspace,
+            flushStore: async () => { if (deps.runtime.store) await deps.runtime.store.flush(); },
           },
           {
             folderId: msg.folderId,
@@ -552,6 +558,8 @@ async function routeMessage(
             fs: deps.fs, folderLocal: fl, getRepo: deps.getRepo, pool: deps.pool,
             ownerPeerId: deps.identity.peerId, storeSecretKey: deps.runtime.store.secretKey,
             broadcast: deps.broadcast,
+            workspace: deps.workspace,
+            flushStore: async () => { if (deps.runtime.store) await deps.runtime.store.flush(); },
           },
           { folderId: msg.folderId }
         );
@@ -569,6 +577,8 @@ async function routeMessage(
             fs: deps.fs, folderLocal: fl, getRepo: deps.getRepo, pool: deps.pool,
             ownerPeerId: deps.identity.peerId, storeSecretKey: deps.runtime.store.secretKey,
             broadcast: deps.broadcast,
+            workspace: deps.workspace,
+            flushStore: async () => { if (deps.runtime.store) await deps.runtime.store.flush(); },
           },
           { folderId: msg.folderId }
         );

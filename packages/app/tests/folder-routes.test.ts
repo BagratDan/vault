@@ -26,6 +26,8 @@ function makeDeps(): Parameters<typeof folderAdd>[0] {
     ownerPeerId: HEX_64,
     storeSecretKey: new Uint8Array(64),
     broadcast: () => undefined,
+    workspace: { getName: () => "ws", ingest: async () => undefined } as never,
+    flushStore: async () => undefined,
   };
 }
 
