@@ -147,8 +147,17 @@ importers:
       '@vault/domain':
         specifier: workspace:*
         version: link:../domain
+      autobase:
+        specifier: ^7.13.0
+        version: 7.28.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3)
+      autobee:
+        specifier: ^1.0.0
+        version: 1.0.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3)
+      b4a:
+        specifier: ^1.6.6
+        version: 1.8.1
       corestore:
-        specifier: ^7.0.0
+        specifier: ^7.4.0
         version: 7.9.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))(bare-url@2.4.3)
       hyperbee:
         specifier: ^2.20.0
@@ -156,6 +165,12 @@ importers:
       hypercore:
         specifier: ^11.0.0
         version: 11.30.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3)
+      hypercore-crypto:
+        specifier: ^3.4.0
+        version: 3.7.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))(bare-url@2.4.3)
+      hyperswarm:
+        specifier: ^4.8.0
+        version: 4.17.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3)
     devDependencies:
       vitest:
         specifier: ^2.1.0
@@ -1228,6 +1243,18 @@ packages:
   asynckit@0.4.0:
     resolution: {integrity: sha512-Oei9OH4tRh0YqU3GxhX79dM/mwVgvbZJaSNaRk+bshkj0S5cfHcgYakreBjrHwatXKbz+IoIdYLxrKim2MjW0Q==}
 
+  autobase@7.28.1:
+    resolution: {integrity: sha512-I8SHcJE/ru5Nun6NpqwRjenB8aK01b9z1qNeyx4XuG+BxeFUpXk0ZT2u3/nG+GZnObUTFMCKOo2fbAv7ipcaLw==}
+
+  autobee-encryption@0.0.5:
+    resolution: {integrity: sha512-uk6xHW0WwKTK57PhqFhoKDyQO4Fenvsj+V8c+b18SXC3qMC3X6ubTy2GZqgxP1KWsTDRYM+IKfaDmWWpqmZ0Mg==}
+
+  autobee-wakeup@1.1.2:
+    resolution: {integrity: sha512-4erRudtDOEUuyeOxZKPjNejpkG4NYyoqIIo6zysolQ5vXF9lQkSp152rlgCuKqB+0u/PVH2/a+r2G8wy9J9cxA==}
+
+  autobee@1.0.0:
+    resolution: {integrity: sha512-qclfoZt+UsMM8yuvRlToVDtgp4Cmi6n7TpRapwhJr/AFGETPBltUCC52/RQwpLBmM/qrDd8S8yiMwk5WRkn6Zw==}
+
   autoprefixer@10.5.0:
     resolution: {integrity: sha512-FMhOoZV4+qR6aTUALKX2rEqGG+oyATvwBt9IIzVR5rMa2HRWPkxf+P+PAJLD1I/H5/II+HuZcBJYEFBpq39ong==}
     engines: {node: ^10 || ^12 || >=14}
@@ -1714,6 +1741,9 @@ packages:
   convert-source-map@2.0.0:
     resolution: {integrity: sha512-Kvp459HrV2FEJ1CAsi1Ku+MY3kasH19TFykTz2xWmMeq6bk2NU3XXvfJ+Q61m0xktWwt+1HSYf3JZsTms3aRJg==}
 
+  core-coupler@2.0.0:
+    resolution: {integrity: sha512-FJuEvsdCMwx0Wu+gFQ49rGCi8LCXh8kizHsCQwkdgPZFEFiF0z2HDvyIs+fPt5wMIfU2UVFDuN+dtpfbIxJE6g==}
+
   corestore@7.9.2:
     resolution: {integrity: sha512-dyIktVSVLu0skZ1UM4yODbNbZ46dBpTHypzwlwET1btVuS3YIf66Zz8Tx8h3Xa8nbLO2USGqrYtvPYzSRj2wCA==}
 
@@ -1794,6 +1824,9 @@ packages:
 
   electron-to-chromium@1.5.361:
     resolution: {integrity: sha512-Q6Hts7N9FnJc5LeGRINFvLhCI9xZmNtTDe5ZbcVezQz7cU4a8Aua3GH1b8J2XY8Al9PF+OCwYqhgsOOheMdvkA==}
+
+  encryption-encoding@1.0.3:
+    resolution: {integrity: sha512-+SlKCeULnNnwBF2rGrJlSLYjwITwfjO8PLSHzue4yt+2DsVJUU8GakRkH4+mTaa3FzpxVjpTy1kKR2gYGctNWg==}
 
   entities@6.0.1:
     resolution: {integrity: sha512-aN97NXWF6AWBTahfVOIrB/NShkzi5H7F9r1s9mD3cDj4Ko5f2qhhVoYMibXF7GlLveb/D2ioWay8lxI97Ven3g==}
@@ -2036,6 +2069,9 @@ packages:
   https-proxy-agent@7.0.6:
     resolution: {integrity: sha512-vK9P5/iUfdl95AI+JVyUuIcVtd4ofvtrOr3HNtM2yxC9bnMbEdp3x01OhQNnjb8IJYi38VlTE3mBXwcfvywuSw==}
     engines: {node: '>= 14'}
+
+  hyperbee2@2.10.2:
+    resolution: {integrity: sha512-1qnOAgKy50AS560Mh3CAaBONUs9MVHs6VwGUAYT7UN9DFCC9JLFVdIb83GLf1vj+dNqX0wjfhkayFxbtkNakCQ==}
 
   hyperbee@2.27.3:
     resolution: {integrity: sha512-PXURH2U4juUZyJRKHTrY5z1zX851pmI1Q0jfv5F/hCIErDt/ND8jOZuxc3hfOLM9f0W3qJEDTMlV5AJBkVPy8w==}
@@ -2446,6 +2482,9 @@ packages:
   protocol-buffers-encodings@1.2.0:
     resolution: {integrity: sha512-daeNPuKh1NlLD1uDfbLpD+xyUTc07nEtfHwmBZmt/vH0B7VOM+JOCOpDcx9ZRpqHjAiIkGqyTDi+wfGSl17R9w==}
 
+  protomux-wakeup@2.9.0:
+    resolution: {integrity: sha512-K93WhS9qIRL8WAQPU2V3PxdpQ1oRlQCFyCyIYInoq/iRkcuO1BegRERWo7SS1Tcme14VKGWOr/IivjjYnHan3Q==}
+
   protomux@3.11.0:
     resolution: {integrity: sha512-Ze43XaNHbL6zQ/zJwVYvue7Aj8pDB1HNnISsrFhAur3291Y+Iu2fMhOpySD73J/32BoBIUYrhl07lJsBR/fUVA==}
 
@@ -2696,6 +2735,9 @@ packages:
 
   timeout-refresh@2.0.1:
     resolution: {integrity: sha512-SVqEcMZBsZF9mA78rjzCrYrUs37LMJk3ShZ851ygZYW1cMeIjs9mL57KO6Iv5mmjSQnOe/29/VAfGXo+oRCiVw==}
+
+  tiny-buffer-map@1.1.1:
+    resolution: {integrity: sha512-C1eDw6ks9CmkDbWVCPHobuixPTkxGa7IDERlaVk98dv4tOUdz42o3haHBr0uhNxbj0gczBTVIyS2uQsu+1vc2Q==}
 
   tiny-byte-size@1.1.0:
     resolution: {integrity: sha512-OQ+i4RZzIQ0CR22DEr3G+ckRwN93R9UQMNqeym41Ntfj/dchPyWu1cuu8mvdCv61Ng3uOmNgX+8WesK1f37x+w==}
@@ -3955,6 +3997,86 @@ snapshots:
 
   asynckit@0.4.0: {}
 
+  autobase@7.28.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3):
+    dependencies:
+      b4a: 1.8.1
+      bare-events: 2.8.3(bare-abort-controller@1.1.2)
+      compact-encoding: 3.1.0
+      core-coupler: 2.0.0
+      debounceify: 1.1.0
+      encryption-encoding: 1.0.3(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)
+      hyperbee: 2.27.3(bare-abort-controller@1.1.2)
+      hypercore: 11.30.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3)
+      hypercore-crypto: 3.7.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))(bare-url@2.4.3)
+      hypercore-id-encoding: 1.3.0
+      hyperschema: 1.21.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)
+      index-encoder: 3.5.0
+      nanoassert: 2.0.0
+      protomux-wakeup: 2.9.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))(bare-url@2.4.3)
+      ready-resource: 1.2.0(bare-abort-controller@1.1.2)
+      resolve-reject-promise: 1.1.0
+      safety-catch: 1.0.3
+      scope-lock: 1.2.4
+      signal-promise: 1.0.3
+      sodium-universal: 5.0.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))(bare-url@2.4.3)
+      sub-encoder: 2.1.3
+      tiny-buffer-map: 1.1.1
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
+      - bare-url
+      - react-native-b4a
+      - sodium-javascript
+
+  autobee-encryption@0.0.5(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3):
+    dependencies:
+      b4a: 1.8.1
+      compact-encoding: 2.19.2
+      hypercore: 11.30.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3)
+      hypercore-crypto: 3.7.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))(bare-url@2.4.3)
+      sodium-universal: 5.0.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))(bare-url@2.4.3)
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
+      - bare-events
+      - bare-url
+      - react-native-b4a
+      - sodium-javascript
+
+  autobee-wakeup@1.1.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3):
+    dependencies:
+      b4a: 1.8.1
+      core-coupler: 2.0.0
+      protomux-wakeup: 2.9.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))(bare-url@2.4.3)
+      ready-resource: 1.2.0(bare-abort-controller@1.1.2)
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
+      - bare-events
+      - bare-url
+      - react-native-b4a
+      - sodium-javascript
+
+  autobee@1.0.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3):
+    dependencies:
+      autobee-encryption: 0.0.5(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3)
+      autobee-wakeup: 1.1.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3)
+      b4a: 1.8.1
+      compact-encoding: 2.19.2
+      hyperbee2: 2.10.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3)
+      hypercore: 11.30.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3)
+      hypercore-id-encoding: 1.3.0
+      hyperschema: 1.21.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)
+      ready-resource: 1.2.0(bare-abort-controller@1.1.2)
+      safety-catch: 1.0.3
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
+      - bare-events
+      - bare-url
+      - react-native-b4a
+      - sodium-javascript
+
   autoprefixer@10.5.0(postcss@8.5.15):
     dependencies:
       browserslist: 4.28.2
@@ -4650,6 +4772,10 @@ snapshots:
 
   convert-source-map@2.0.0: {}
 
+  core-coupler@2.0.0:
+    dependencies:
+      safety-catch: 1.0.3
+
   corestore@7.9.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))(bare-url@2.4.3):
     dependencies:
       b4a: 1.8.1
@@ -4756,6 +4882,14 @@ snapshots:
       gopd: 1.2.0
 
   electron-to-chromium@1.5.361: {}
+
+  encryption-encoding@1.0.3(bare-abort-controller@1.1.2)(bare-buffer@3.6.0):
+    dependencies:
+      hyperschema: 1.21.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
+      - react-native-b4a
 
   entities@6.0.1: {}
 
@@ -5071,6 +5205,24 @@ snapshots:
       debug: 4.4.3
     transitivePeerDependencies:
       - supports-color
+
+  hyperbee2@2.10.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3):
+    dependencies:
+      b4a: 1.8.1
+      bare-events: 2.8.3(bare-abort-controller@1.1.2)
+      compact-encoding: 3.1.0
+      hypercore: 11.30.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3)
+      hypercore-errors: 1.5.0
+      hyperschema: 1.21.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)
+      protocol-buffers-encodings: 1.2.0
+      scope-lock: 1.2.4
+      streamx: 2.25.0(bare-abort-controller@1.1.2)
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
+      - bare-url
+      - react-native-b4a
+      - sodium-javascript
 
   hyperbee@2.27.3(bare-abort-controller@1.1.2):
     dependencies:
@@ -5683,6 +5835,20 @@ snapshots:
     transitivePeerDependencies:
       - react-native-b4a
 
+  protomux-wakeup@2.9.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))(bare-url@2.4.3):
+    dependencies:
+      b4a: 1.8.1
+      hypercore-crypto: 3.7.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))(bare-url@2.4.3)
+      hyperschema: 1.21.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)
+      protomux: 3.11.0
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
+      - bare-events
+      - bare-url
+      - react-native-b4a
+      - sodium-javascript
+
   protomux@3.11.0:
     dependencies:
       b4a: 1.8.1
@@ -6057,6 +6223,12 @@ snapshots:
   time-ordered-set@2.0.1: {}
 
   timeout-refresh@2.0.1: {}
+
+  tiny-buffer-map@1.1.1:
+    dependencies:
+      b4a: 1.8.1
+    transitivePeerDependencies:
+      - react-native-b4a
 
   tiny-byte-size@1.1.0: {}
 
