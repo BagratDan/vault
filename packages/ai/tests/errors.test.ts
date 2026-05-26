@@ -2,9 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ModelLoadError,
   InferenceOomError,
-  InferenceRuntimeError,
   HardwareUnsupportedError,
-  ModelDownloadError,
   isAiError,
 } from "../src/errors.js";
 
