@@ -6,6 +6,7 @@ import { openAutobeeStore } from "../src/store.js";
 import { Repo } from "../src/repo.js";
 import { Indexes } from "../src/indexes.js";
 import { signCanonical } from "../src/sign.js";
+import { FolderLocal } from "../src/folder-local.js";
 import { newUlid } from "@vault/domain";
 
 describe("Repo + Indexes over Autobee", () => {
@@ -115,5 +116,142 @@ describe("Repo + Indexes over Autobee", () => {
     await opened.flush();
     const ids = await indexes.memoryIdsForPerson("pid-sarah");
     expect(new Set(ids)).toEqual(new Set(["mem-1", "mem-2"]));
+  });
+});
+
+describe("Repo — Plan 4 folder-aware methods", () => {
+  it("putMemoryByVisibility routes private to FolderLocal, public to autobee", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vault-repo-fl-"));
+    const fl = new FolderLocal(dir);
+    await fl.ready();
+    try {
+      const ownerPeerId = "a".repeat(64);
+      const appended: Array<{ kind: string; key: string; value: unknown }> = [];
+      const view = {
+        async get() {
+          return null;
+        },
+        async *createReadStream() {
+          /* empty */
+        },
+      };
+      const append = async (op: { kind: string; key: string; value: unknown }) => {
+        appended.push(op);
+      };
+      const repo = new Repo({
+        view: view as never,
+        append: append as never,
+        ownerPeerId,
+        folderLocal: fl,
+      });
+
+      const now = "2026-05-26T10:00:00.000Z";
+      const base = {
+        createdAt: now,
+        updatedAt: now,
+        ownerPeerId,
+        provenance: { kind: "user" as const },
+        summary: "x",
+        body: "y",
+        sourceRecordId: newUlid(),
+        confidence: 0.5,
+        tags: [] as string[],
+        requestableScopes: ["metadata", "snippet", "file"] as Array<
+          "metadata" | "snippet" | "file"
+        >,
+      };
+      const pubMem = {
+        ...base,
+        id: newUlid(),
+        folderId: newUlid(),
+      };
+      const privMem = {
+        ...base,
+        id: newUlid(),
+        folderId: newUlid(),
+      };
+
+      await repo.putMemoryByVisibility(pubMem, "public");
+      await repo.putMemoryByVisibility(privMem, "private");
+
+      // Public memory went to autobee append:
+      expect(
+        appended.some(
+          (e) => e.kind === "memory" && (e.value as { id: string }).id === pubMem.id
+        )
+      ).toBe(true);
+      // Private memory did NOT touch autobee append:
+      expect(
+        appended.some((e) => (e.value as { id: string }).id === privMem.id)
+      ).toBe(false);
+      // Private memory IS in FolderLocal:
+      const inFL = await fl.getPrivateMemory(privMem.id);
+      expect(inFL?.id).toBe(privMem.id);
+    } finally {
+      await fl.close();
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("listMemoriesInFolder unions public + private for the owner", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vault-repo-fl-"));
+    const fl = new FolderLocal(dir);
+    await fl.ready();
+    try {
+      const ownerPeerId = "a".repeat(64);
+      const now = "2026-05-26T10:00:00.000Z";
+      const folderId = newUlid();
+      const base = {
+        createdAt: now,
+        updatedAt: now,
+        ownerPeerId,
+        provenance: { kind: "user" as const },
+        sourceRecordId: newUlid(),
+        confidence: 0.5,
+        tags: [] as string[],
+        requestableScopes: ["metadata", "snippet", "file"] as Array<
+          "metadata" | "snippet" | "file"
+        >,
+        folderId,
+      };
+      const pubMem = {
+        ...base,
+        id: newUlid(),
+        summary: "public",
+        body: "x",
+      };
+      // A view that returns the public memory from listMemories:
+      const view = {
+        async get() {
+          return null;
+        },
+        async *createReadStream(opts: { gte?: string }) {
+          if (opts.gte === "mem/") {
+            yield { key: `mem/${pubMem.id}`, value: pubMem };
+          }
+        },
+      };
+      const append = async () => undefined;
+      const repo = new Repo({
+        view: view as never,
+        append,
+        ownerPeerId,
+        folderLocal: fl,
+      });
+
+      await fl.putPrivateMemory({
+        ...base,
+        id: newUlid(),
+        summary: "private",
+        body: "y",
+      });
+
+      const all = await repo.listMemoriesInFolder(folderId);
+      const summaries = all.map((m) => m.summary).sort();
+      expect(summaries).toEqual(["private", "public"]);
+    } finally {
+      await fl.close();
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 });

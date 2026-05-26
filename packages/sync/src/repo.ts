@@ -7,6 +7,7 @@ import {
   externalRefShape,
   relationshipShape,
   sourceRecordShape,
+  folderPublicShape,
   type Memory,
   type Person,
   type Place,
@@ -15,8 +16,11 @@ import {
   type ExternalRef,
   type Relationship,
   type SourceRecord,
+  type FolderPublic,
+  type FolderVisibility,
   type Ulid,
 } from "@vault/domain";
+import type { FolderLocal } from "./folder-local.js";
 
 const PREFIX = {
   memory: "mem/",
@@ -27,6 +31,7 @@ const PREFIX = {
   externalRef: "ref/",
   relationship: "rel/",
   source: "src/",
+  folder: "folder/",
 } as const;
 
 interface View {
@@ -41,17 +46,20 @@ export interface RepoDeps {
   view: View;
   append: (op: unknown) => Promise<void>;
   ownerPeerId: string;
+  folderLocal?: FolderLocal | null;
 }
 
 export class Repo {
   private readonly view: View;
   private readonly append: (op: unknown) => Promise<void>;
   private readonly ownerPeerId: string;
+  private readonly folderLocal: FolderLocal | null;
 
   constructor(deps: RepoDeps) {
     this.view = deps.view;
     this.append = deps.append;
     this.ownerPeerId = deps.ownerPeerId;
+    this.folderLocal = deps.folderLocal ?? null;
   }
 
   // Memory ----------------------------------------------------------------
@@ -64,6 +72,65 @@ export class Repo {
   }
   async listMemories(): Promise<Memory[]> {
     return this.listPrefix(PREFIX.memory, (raw) => memoryShape.parse(raw));
+  }
+
+  /**
+   * Write a memory to the correct storage tier based on its folder's
+   * visibility. PRIVATE folder memories go to the owner-local Hyperbee
+   * (FolderLocal) and NEVER reach Autobee. PUBLIC folder memories go
+   * through the normal autobee append. This is the storage-tier half of
+   * the two-gate privacy model (the other gate is the search-probe filter).
+   */
+  async putMemoryByVisibility(m: Memory, visibility: FolderVisibility): Promise<void> {
+    if (visibility === "private") {
+      if (!this.folderLocal) {
+        throw new Error("putMemoryByVisibility: private folder requires FolderLocal");
+      }
+      await this.folderLocal.putPrivateMemory(m);
+      return;
+    }
+    await this.putMemory(m); // existing autobee path
+  }
+
+  /** Union the owner's public (autobee) + private (FolderLocal) memories for a folder. */
+  async listMemoriesInFolder(folderId: string): Promise<Memory[]> {
+    const all = await this.listMemories();
+    const publicHits = all.filter((m) => m.folderId === folderId);
+    let privateHits: Memory[] = [];
+    if (this.folderLocal) {
+      privateHits = await this.folderLocal.listPrivateMemoriesByFolder(folderId);
+    }
+    return [...publicHits, ...privateHits];
+  }
+
+  /** Soft-delete a PUBLIC (autobee) memory by stamping deletedAt. */
+  async markMemoryDeleted(memoryId: string): Promise<void> {
+    const m = await this.getMemory(memoryId as Ulid);
+    if (!m) return;
+    const updated = {
+      ...m,
+      deletedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await this.append({
+      kind: "memory",
+      key: `${PREFIX.memory}${m.id}`,
+      value: updated,
+    });
+  }
+
+  // Folder (PUBLIC subset, synced) ----------------------------------------
+  async putFolderPublic(folderPublic: FolderPublic): Promise<void> {
+    folderPublicShape.parse(folderPublic);
+    await this.append({
+      kind: "folder",
+      key: `${PREFIX.folder}${folderPublic.id}`,
+      value: folderPublic,
+    });
+  }
+
+  async listFoldersPublic(): Promise<FolderPublic[]> {
+    return this.listPrefix(PREFIX.folder, (raw) => folderPublicShape.parse(raw));
   }
 
   // Person ----------------------------------------------------------------
