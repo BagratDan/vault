@@ -80,4 +80,9 @@ export class VaultFs {
     const abs = await this.resolveSafe(rel);
     await fs.mkdir(abs, { recursive: true, mode: 0o700 });
   }
+
+  /** Resolve a relative subpath against VAULT_ROOT. Returns absolute path. */
+  path(rel: string): string {
+    return path.resolve(this.root, rel);
+  }
 }
