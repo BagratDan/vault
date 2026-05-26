@@ -7,6 +7,8 @@ import { AnswerCard } from "./components/AnswerCard.js";
 import { FilterControls, type Filters } from "./components/FilterControls.js";
 import { ModelStatus } from "./components/ModelStatus.js";
 import { VaultSetup } from "./components/VaultSetup.js";
+import { PeerList, type Peer } from "./components/PeerList.js";
+import { InviteTokenDisplay } from "./components/InviteTokenDisplay.js";
 import type { Hit, Citation, ClientMessage } from "./types.js";
 
 export function App() {
@@ -27,6 +29,11 @@ export function App() {
     | { kind: "info" | "success" | "error"; text: string }
     | null
   >(null);
+  const [peers, setPeers] = useState<Peer[]>([]);
+  const [selfPeerId, setSelfPeerId] = useState<string>("");
+  const [inviteToken, setInviteToken] = useState<{ token: string; expiresAt: string } | null>(
+    null
+  );
   const audioQueue = useRef<{ queue: string[]; el: HTMLAudioElement | null }>({
     queue: [],
     el: null,
@@ -74,11 +81,25 @@ export function App() {
       });
       audioQueue.current.el = el;
     }
-    return ws.onMessage((m) => {
+    const unsubscribe = ws.onMessage((m) => {
       if (m.kind === "vault.status") {
         setVaultStateView(m.state);
+        if (m.selfPeerId) setSelfPeerId(m.selfPeerId);
       } else if (m.kind === "vault.created" || m.kind === "vault.joined") {
         ws.send({ kind: "vault.status" });
+        ws.send({ kind: "peer.list" });
+      } else if (m.kind === "peer.list") {
+        setPeers(m.peers);
+      } else if (m.kind === "peer.connected") {
+        setPeers((prev) =>
+          prev.some((p) => p.peerId === m.peer.peerId)
+            ? prev
+            : [...prev, { ...m.peer, role: "member" }]
+        );
+      } else if (m.kind === "peer.disconnected") {
+        setPeers((prev) => prev.filter((p) => p.peerId !== m.peerId));
+      } else if (m.kind === "invite.token") {
+        setInviteToken({ token: m.token, expiresAt: m.expiresAt });
       } else if (m.kind === "search.hits") {
         setHits(m.hits);
       } else if (m.kind === "capture.ack") {
@@ -109,6 +130,8 @@ export function App() {
         setPlaying(false);
       }
     });
+    ws.send({ kind: "peer.list" });
+    return unsubscribe;
   }, [ws]);
 
   const send = (msg: ClientMessage) => ws?.send(msg);
@@ -142,8 +165,23 @@ export function App() {
     <main className="mx-auto max-w-3xl space-y-5 p-6">
       <header className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Vault</h1>
-        <ModelStatus state={connState} />
+        <div className="flex items-center gap-3">
+          <PeerList
+            peers={peers}
+            selfPeerId={selfPeerId}
+            onCreateInvite={() => send({ kind: "vault.invite-create" })}
+          />
+          <ModelStatus state={connState} />
+        </div>
       </header>
+
+      {inviteToken && (
+        <InviteTokenDisplay
+          token={inviteToken.token}
+          expiresAt={inviteToken.expiresAt}
+          onDismiss={() => setInviteToken(null)}
+        />
+      )}
 
       {banner && <Banner banner={banner} onDismiss={() => setBanner(null)} />}
 
