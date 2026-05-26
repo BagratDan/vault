@@ -38,4 +38,13 @@ describe("VaultFs", () => {
     const exists = await fs.stat(path.join(root, "a/b/c.txt"));
     expect(exists.isFile()).toBe(true);
   });
+
+  it("bootstraps when VAULT_ROOT does not exist yet", async () => {
+    const fresh = path.join(os.tmpdir(), `vault-fs-fresh-${Date.now()}`);
+    const api = new VaultFs(fresh);
+    await api.ensureDir("data");
+    const st = await fs.stat(path.join(fresh, "data"));
+    expect(st.isDirectory()).toBe(true);
+    await fs.rm(fresh, { recursive: true, force: true });
+  });
 });

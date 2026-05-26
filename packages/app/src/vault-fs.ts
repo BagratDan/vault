@@ -24,9 +24,14 @@ export class VaultFs {
     if (resolved !== this.root && !resolved.startsWith(this.root + path.sep)) {
       throw new Error(`refused: ${rel} resolves outside VAULT_ROOT`);
     }
-    // Find the deepest ancestor that exists, realpath it, and verify the
-    // real ancestor is still under realpath(root).
-    const realRoot = await fs.realpath(this.root).catch(() => this.root);
+    // Ensure the root exists as a real directory before the symlink check —
+    // otherwise the deepest-existing-ancestor walk would land on a parent of
+    // root and (correctly) refuse it as "outside root".
+    await fs.mkdir(this.root, { recursive: true, mode: 0o700 });
+    const realRoot = await fs.realpath(this.root);
+    // Walk up from `resolved` to the deepest existing path; realpath it to
+    // detect a symlink-based escape; require the real path to still be
+    // under realRoot.
     let cursor = resolved;
     while (cursor !== path.dirname(cursor)) {
       try {
