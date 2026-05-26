@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import os from "node:os";
 
 export interface WriteOptions {
   /** POSIX file mode. Defaults to 0o600 — readable/writable by owner only. */
@@ -54,6 +55,63 @@ export class VaultFs {
       }
     }
     return resolved;
+  }
+
+  /**
+   * Resolve an absolute path that may live anywhere on the user's machine
+   * (NOT confined to VAULT_ROOT). Used by folder-add to validate user-
+   * supplied paths. Refuses paths whose realpath escapes $HOME or sits in
+   * a system directory. The deepest existing ancestor is realpath'd to
+   * catch symlink-based escapes.
+   */
+  async resolveSafeAbsolute(absPath: string): Promise<string> {
+    if (!path.isAbsolute(absPath)) {
+      throw new Error(`refused: ${absPath} is not absolute`);
+    }
+    const refuseList = [
+      "/etc",
+      "/var",
+      "/System",
+      "/private",
+      "/Library/Keychains",
+      "/.ssh",
+    ];
+    for (const r of refuseList) {
+      if (absPath === r || absPath.startsWith(r + path.sep)) {
+        throw new Error(`refused: ${absPath} is in system refuse-list`);
+      }
+    }
+    const home = os.homedir();
+    const homeReal = await fs.realpath(home);
+    let cursor = absPath;
+    let realCursor: string | null = null;
+    while (cursor !== path.dirname(cursor)) {
+      try {
+        realCursor = await fs.realpath(cursor);
+        break;
+      } catch (err) {
+        if (
+          err &&
+          typeof err === "object" &&
+          "code" in err &&
+          (err as { code: string }).code === "ENOENT"
+        ) {
+          cursor = path.dirname(cursor);
+          continue;
+        }
+        throw err;
+      }
+    }
+    if (!realCursor) {
+      throw new Error(`refused: ${absPath} has no existing ancestor`);
+    }
+    if (
+      realCursor !== homeReal &&
+      !realCursor.startsWith(homeReal + path.sep)
+    ) {
+      throw new Error(`refused: ${absPath} resolves outside $HOME`);
+    }
+    return absPath;
   }
 
   async writeFile(

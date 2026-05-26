@@ -48,3 +48,37 @@ describe("VaultFs", () => {
     await fs.rm(fresh, { recursive: true, force: true });
   });
 });
+
+describe("VaultFs.resolveSafeAbsolute", () => {
+  // resolveSafeAbsolute does not depend on VAULT_ROOT, so any root works.
+  const fsApi = new VaultFs(os.tmpdir());
+
+  it("accepts a path inside the user's home", async () => {
+    const home = os.homedir();
+    await expect(fsApi.resolveSafeAbsolute(home)).resolves.toBe(home);
+  });
+
+  it("rejects /etc/passwd", async () => {
+    await expect(fsApi.resolveSafeAbsolute("/etc/passwd")).rejects.toThrow(
+      /refuse-list/
+    );
+  });
+
+  it("rejects /System/Library", async () => {
+    await expect(fsApi.resolveSafeAbsolute("/System/Library")).rejects.toThrow(
+      /refuse-list/
+    );
+  });
+
+  it("rejects a non-absolute path", async () => {
+    await expect(fsApi.resolveSafeAbsolute("relative/path")).rejects.toThrow(
+      /not absolute/
+    );
+  });
+
+  it("rejects a path whose ancestor is outside $HOME", async () => {
+    await expect(fsApi.resolveSafeAbsolute("/tmp/some/dir")).rejects.toThrow(
+      /outside \$HOME/
+    );
+  });
+});
