@@ -121,9 +121,11 @@ export function makeApply(deps: ApplyDeps) {
 
       if (dataOp.kind === "folder") {
         // Folder records are self-signed by the owner using their own autobee
-        // writer key — which is the same key that appended this op. Verify the
-        // signature against node.from.key (the writer's public key). The roster
-        // gate above already ensures the writer is an admitted peer.
+        // writer key — the same key that appended this op. Bind the claimed
+        // ownerPeerId to the writer so an admitted peer can't write a folder
+        // record impersonating another peer's ownership.
+        const claimedOwner = dataOp.value["ownerPeerId"];
+        if (claimedOwner !== writerPeerId) continue;
         const sig = dataOp.value["sig"] as string | undefined;
         if (typeof sig !== "string") continue;
         const ok = verifyCanonical(stripSig(dataOp.value), sig, node.from.key);

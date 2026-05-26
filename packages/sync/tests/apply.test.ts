@@ -331,5 +331,81 @@ describe("apply()", () => {
       );
       expect(data[`folder/${folderBody.id}`]).toBeUndefined();
     });
+
+    it("rejects a folder with no signature", async () => {
+      const { data, view, base } = makeStore();
+      const apply = makeApply(deps);
+      // Founder bootstrap
+      const founderMember = {
+        id: "01J0ABC0000000000000000004",
+        kind: "member" as const,
+        peerId: founderPeerId,
+        displayName: "Sarah",
+        role: "admin" as const,
+        admittedBy: founderPeerId,
+        admittedAt: "2026-05-26T10:00:00.000Z",
+        publicKey: founderPeerId,
+      };
+      await apply(
+        [node({ kind: "member", key: `member/${founderPeerId}`,
+          value: { ...founderMember, sig: signCanonical(founderMember, founder.secretKey) } })],
+        view as never, base as never
+      );
+      const folderBody = {
+        id: "01J0FOLDER0000000000000004",
+        createdAt: "2026-05-26T10:00:00.000Z",
+        updatedAt: "2026-05-26T10:00:00.000Z",
+        ownerPeerId: founderPeerId,
+        provenance: { kind: "user" as const },
+        kind: "folder" as const,
+        displayName: "NoSig",
+        visibility: "public" as const,
+      };
+      // No sig field at all
+      await apply(
+        [node({ kind: "folder", key: `folder/${folderBody.id}`, value: folderBody })],
+        view as never, base as never
+      );
+      expect(data[`folder/${folderBody.id}`]).toBeUndefined();
+    });
+
+    it("rejects a folder whose ownerPeerId is not the writer (impersonation)", async () => {
+      const { data, view, base } = makeStore();
+      const apply = makeApply(deps);
+      // Founder bootstrap
+      const founderMember = {
+        id: "01J0ABC0000000000000000005",
+        kind: "member" as const,
+        peerId: founderPeerId,
+        displayName: "Sarah",
+        role: "admin" as const,
+        admittedBy: founderPeerId,
+        admittedAt: "2026-05-26T10:00:00.000Z",
+        publicKey: founderPeerId,
+      };
+      await apply(
+        [node({ kind: "member", key: `member/${founderPeerId}`,
+          value: { ...founderMember, sig: signCanonical(founderMember, founder.secretKey) } })],
+        view as never, base as never
+      );
+      // Founder (admitted) writes a folder claiming stranger owns it
+      const folderBody = {
+        id: "01J0FOLDER0000000000000005",
+        createdAt: "2026-05-26T10:00:00.000Z",
+        updatedAt: "2026-05-26T10:00:00.000Z",
+        ownerPeerId: strangerPeerId, // impersonation: not the writer
+        provenance: { kind: "user" as const },
+        kind: "folder" as const,
+        displayName: "Impersonated",
+        visibility: "public" as const,
+      };
+      // Signed by founder (the writer), valid sig — but ownerPeerId lies
+      await apply(
+        [node({ kind: "folder", key: `folder/${folderBody.id}`,
+          value: { ...folderBody, sig: signCanonical(folderBody, founder.secretKey) } })],
+        view as never, base as never
+      );
+      expect(data[`folder/${folderBody.id}`]).toBeUndefined();
+    });
   });
 });
