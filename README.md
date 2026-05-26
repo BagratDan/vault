@@ -277,14 +277,48 @@ pnpm e2e:multipeer
 
 This spawns two sidecar child processes on different ports + `VAULT_ROOT`s, joins a real Hyperswarm topic, and verifies peer admission via the `peer.list` reply.
 
+## Consent + audit + admin (Plan 3)
+
+After Plan 2 admitted peers see _every_ memory in cross-peer search. Plan 3 gates each individual read with an explicit, time-bounded prompt:
+
+- **Blurred preview** — cross-peer hits arrive with the snippet first-word + bullets (the rest of the body is redacted on the owner's side before the RPC reply leaves the node).
+- **Consent toast** — clicking "Request access" pushes a `consent.request` RPC to the memory's owner. The owner sees a slide-in toast with three buttons (Snippet / Full file / Deny), a fourth Metadata-only secondary, and a 5-minute countdown.
+- **Audit log** — every state change (request, approve, deny, expire) writes a `ConsentEvent` to a per-peer Hypercore under `${VAULT_ROOT}/audit/`. Reachable at `#/audit`.
+- **Admin pane** — `#/admin` lets the founder see the roster + revoke any member; revoked peers' subsequent writes are dropped by `apply()`.
+- **Rate-limit warning** — sliding-window counter (default: 12 / 10 min); the toast shows a yellow banner once the count crosses 8.
+- **Scope ceiling per memory** — at capture time the user chooses which scopes (metadata / snippet / file) are askable. Owner-side `respond` short-circuits to deny if a request exceeds the ceiling.
+
+### Running the consent demo
+
+On each laptop, the Plan 2 setup applies (`pnpm install && pnpm dev`). Follow the demo script in [docs/DEMO_PLAN_3.md](docs/DEMO_PLAN_3.md) — 90-second screen recording: capture on A, search on B, request → approve, watch the blurred preview swap for full text + green check.
+
+### Consent E2E test
+
+Excluded from CI; run on a dev machine with outbound UDP:
+
+```bash
+pnpm e2e:consent
+```
+
+Spawns two sidecars, walks the entire flow (capture → search → request → approve → granted), and asserts the requester receives unblurred text via the consent grant.
+
+### Known limitations (Plan 3)
+
+- **Cross-peer audit verification** — Plan 3 ships local timeline only; "admin pulls peers' logs and cross-checks" is explicitly v2.5 (spec §7).
+- **Retention policy** — audit logs grow forever in Plan 3; pruning + retention windows are future work.
+- **No soft consent / "remember this decision"** — by design (spec §8.1 hard-consent stance). Every request is a fresh decision.
+- **No per-matter sub-vaults** — single vault per peer; matter-scoping deferred to v3.
+- **Per-peer audit aggregation by admin** — same deferred line as cross-peer verification.
+
 ## Submission deliverables
 
 - **Source code** — this repo.
 - **Repository access** — granted to `@elchiapp` (pre-submission).
 - **README** — this file.
 - **Architecture notes** — [docs/superpowers/specs/2026-05-25-vault-design.md](docs/superpowers/specs/2026-05-25-vault-design.md).
-- **Implementation plans** — Plan 1: [docs/superpowers/plans/2026-05-26-vault-1-foundation.md](docs/superpowers/plans/2026-05-26-vault-1-foundation.md). Plan 2: [docs/superpowers/plans/2026-05-26-vault-2-multi-peer-sync.md](docs/superpowers/plans/2026-05-26-vault-2-multi-peer-sync.md).
+- **Implementation plans** — Plan 1: [docs/superpowers/plans/2026-05-26-vault-1-foundation.md](docs/superpowers/plans/2026-05-26-vault-1-foundation.md). Plan 2: [docs/superpowers/plans/2026-05-26-vault-2-multi-peer-sync.md](docs/superpowers/plans/2026-05-26-vault-2-multi-peer-sync.md). Plan 3: [docs/superpowers/plans/2026-05-26-vault-3-consent-audit-admin.md](docs/superpowers/plans/2026-05-26-vault-3-consent-audit-admin.md).
 - **Multi-peer demo script** — [docs/DEMO_PLAN_2.md](docs/DEMO_PLAN_2.md).
+- **Consent demo script** — [docs/DEMO_PLAN_3.md](docs/DEMO_PLAN_3.md).
 - **QVAC SDK spike notes** — [docs/superpowers/notes/2026-05-26-qvac-spike.md](docs/superpowers/notes/2026-05-26-qvac-spike.md).
 - **Model/engine tradeoffs** — [MODEL_TRADEOFFS.md](MODEL_TRADEOFFS.md).
 - **Threat model + trust posture** — [THREAT_MODEL.md](THREAT_MODEL.md).
