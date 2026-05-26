@@ -73,6 +73,7 @@ describe("Repo + Indexes over Autobee", () => {
       confidence: 0.9,
       tags: ["t"],
       requestableScopes: ["snippet" as const],
+      folderId: "01J0CAPTVRES000000000000AA",
     };
     await repo.putMemory(mem);
     await opened.flush();
@@ -90,6 +91,7 @@ describe("Repo + Indexes over Autobee", () => {
       confidence: 0.5,
       tags: [],
       requestableScopes: [],
+      folderId: "01J0CAPTVRES000000000000AA",
     };
     const m1 = { ...base, id: newUlid(), summary: "a", body: "a" };
     const m2 = { ...base, id: newUlid(), summary: "b", body: "b" };

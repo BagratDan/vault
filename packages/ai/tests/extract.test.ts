@@ -64,6 +64,7 @@ describe("extractFromText", () => {
       sourceRecordId: "01J0".padEnd(26, "A") as never,
       text: "Sarah said she'd ship the migration by Friday.",
       ownerPeerId,
+      folderId: "01J0CAPTVRES000000000000AA",
     });
     expect(out.memory.summary).toMatch(/Sarah/);
     expect(out.memory.confidence).toBeCloseTo(0.92);
@@ -91,6 +92,7 @@ describe("extractFromText", () => {
       sourceRecordId: "01J0".padEnd(26, "A") as never,
       text: "noisy input",
       ownerPeerId: "a".repeat(64),
+      folderId: "01J0CAPTVRES000000000000AA",
     });
     expect(out.memory.summary).toBe("fallback");
     expect(completionCalls).toBe(2);
@@ -102,6 +104,7 @@ describe("extractFromText", () => {
       sourceRecordId: "01J0".padEnd(26, "A") as never,
       text: "The raw text we will store.",
       ownerPeerId: "a".repeat(64),
+      folderId: "01J0CAPTVRES000000000000AA",
     });
     expect(out.memory.confidence).toBe(0.1);
     expect(out.memory.body).toBe("The raw text we will store.");
@@ -132,6 +135,7 @@ describe("extractFromText", () => {
       sourceRecordId: "01J0".padEnd(26, "A") as never,
       text: "Sarah said she'd ship the migration by Friday.",
       ownerPeerId: "a".repeat(64),
+      folderId: "01J0CAPTVRES000000000000AA",
     });
     expect(out.memory.summary).toMatch(/Sarah/);
     expect(out.events).toHaveLength(1);

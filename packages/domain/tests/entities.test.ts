@@ -30,6 +30,7 @@ describe("entity schemas", () => {
       confidence: 0.92,
       tags: ["auth", "commitment"],
       requestableScopes: ["snippet", "file"] as const,
+      folderId: "01J0CAPTVRES000000000000AA",
     };
     expect(memoryShape.safeParse(m).success).toBe(true);
   });
@@ -43,6 +44,7 @@ describe("entity schemas", () => {
       confidence: -0.1,
       tags: [],
       requestableScopes: [],
+      folderId: "01J0CAPTVRES000000000000AA",
     };
     expect(memoryShape.safeParse(m).success).toBe(false);
   });
@@ -56,6 +58,7 @@ describe("entity schemas", () => {
       confidence: 1,
       tags: [],
       requestableScopes: ["snippet", "bogus"],
+      folderId: "01J0CAPTVRES000000000000AA",
     };
     expect(memoryShape.safeParse(m).success).toBe(false);
   });

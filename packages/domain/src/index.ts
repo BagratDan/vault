@@ -15,3 +15,4 @@ export * from "./revocation.js";
 export * from "./consent-event.js";
 export * from "./folder.js";
 export * from "./invite-codec.js";
+export * from "./captures.js";

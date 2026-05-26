@@ -66,6 +66,7 @@ export interface ExtractInput {
   sourceRecordId: Ulid;
   text: string;
   ownerPeerId: string;
+  folderId: string;
 }
 
 export interface ExtractionResult {
@@ -104,6 +105,7 @@ function buildResult(
     confidence: ext.confidence,
     tags: ext.tags,
     requestableScopes: ["metadata", "snippet", "file"],
+    folderId: input.folderId,
   };
   // The LLM-extraction schema is intentionally looser than the strict
   // domain shapes (e.g. extractionShape.events[].startsAt is z.string(),
@@ -194,6 +196,7 @@ export async function extractFromText(
       confidence: 0.1,
       tags: [],
       requestableScopes: ["metadata", "snippet", "file"],
+      folderId: input.folderId,
     };
     return {
       memory: fallback,

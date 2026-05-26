@@ -34,6 +34,9 @@ export interface CaptureResult {
   duplicateOf?: string;
 }
 
+// Placeholder; Task 18 plumbs the real Captures folder ID from VaultState.
+const CAPTURES_PLACEHOLDER = "01J0CAPTVRES000000000000AA";
+
 export async function captureText(
   deps: CaptureDeps,
   input: CaptureTextInput
@@ -56,6 +59,7 @@ export async function captureText(
     sourceRecordId: asUlid(src.id),
     text: input.text,
     ownerPeerId: deps.ownerPeerId,
+    folderId: CAPTURES_PLACEHOLDER,
   });
 
   // 3. Embed the memory body. The same vector is reused for dedup-search
