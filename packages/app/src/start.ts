@@ -5,6 +5,7 @@ import { Provider, ModelPool } from "@vault/ai";
 import {
   AuditLog,
   Indexes,
+  RateLimiter,
   Repo,
   SwarmTransport,
   openAutobeeStore,
@@ -59,6 +60,8 @@ export async function startVault(): Promise<VaultHandle> {
   });
 
   const workspace = new Workspace(identity.peerId);
+
+  const rateLimiter = new RateLimiter();
 
   const runtime: VaultRuntime = { store: null, swarm: null, state: null };
 
@@ -226,6 +229,7 @@ export async function startVault(): Promise<VaultHandle> {
             requesterDisplayName,
             requestedAt: req.ts,
           });
+          const ratePolicy = rateLimiter.record(peerId);
           broadcastToClients({
             kind: "consent.incoming",
             consentRequestId: req.consentRequestId,
@@ -235,6 +239,7 @@ export async function startVault(): Promise<VaultHandle> {
             memoryTitle: memory.summary ?? req.memoryId,
             scope: req.scope,
             expiresAt: now + 5 * 60 * 1000,
+            ratePolicy,
           });
           await writeAudit({
             requesterPeerId: peerId,
