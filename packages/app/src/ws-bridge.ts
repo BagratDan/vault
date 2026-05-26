@@ -199,7 +199,9 @@ async function routeMessage(
             indexes: deps.getIndexes(),
             workspace: deps.workspace,
             fs: deps.fs,
-            ownerPeerId: deps.ownerPeerId,
+            // Stamp the autobee writer key (same as folders/search/roster),
+            // not identity.peerId, so ownership attribution is consistent.
+            ownerPeerId: deps.runtime.store?.localPeerId ?? deps.ownerPeerId,
             capturesFolderId:
               deps.runtime.state?.capturesFolderId ??
               "01J0CAPTVRES000000000000AA",
@@ -223,7 +225,9 @@ async function routeMessage(
             indexes: deps.getIndexes(),
             workspace: deps.workspace,
             fs: deps.fs,
-            ownerPeerId: deps.ownerPeerId,
+            // Stamp the autobee writer key (same as folders/search/roster),
+            // not identity.peerId, so ownership attribution is consistent.
+            ownerPeerId: deps.runtime.store?.localPeerId ?? deps.ownerPeerId,
             capturesFolderId:
               deps.runtime.state?.capturesFolderId ??
               "01J0CAPTVRES000000000000AA",
@@ -495,7 +499,11 @@ async function routeMessage(
             folderLocal: fl,
             getRepo: deps.getRepo,
             pool: deps.pool,
-            ownerPeerId: deps.identity.peerId,
+            // Folder ownerPeerId MUST be the autobee writer key (store.localPeerId),
+            // not identity.peerId — apply()'s folder gate requires
+            // ownerPeerId === the signing writer, and the folder is signed with
+            // store.secretKey. Mismatch → apply() silently drops the write.
+            ownerPeerId: deps.runtime.store.localPeerId,
             storeSecretKey: deps.runtime.store.secretKey,
             broadcast: deps.broadcast,
             workspace: deps.workspace,
@@ -515,7 +523,7 @@ async function routeMessage(
           folderLocal: fl,
           getRepo: deps.getRepo,
           pool: deps.pool,
-          ownerPeerId: deps.identity.peerId,
+          ownerPeerId: deps.runtime.store?.localPeerId ?? deps.identity.peerId,
           storeSecretKey: deps.runtime.store?.secretKey ?? new Uint8Array(64),
           broadcast: deps.broadcast,
           workspace: deps.workspace,
@@ -533,7 +541,7 @@ async function routeMessage(
         const r = await folderRoutes.folderUpdate(
           {
             fs: deps.fs, folderLocal: fl, getRepo: deps.getRepo, pool: deps.pool,
-            ownerPeerId: deps.identity.peerId, storeSecretKey: deps.runtime.store.secretKey,
+            ownerPeerId: deps.runtime.store.localPeerId, storeSecretKey: deps.runtime.store.secretKey,
             broadcast: deps.broadcast,
             workspace: deps.workspace,
             flushStore: async () => { if (deps.runtime.store) await deps.runtime.store.flush(); },
@@ -556,7 +564,7 @@ async function routeMessage(
         const r = await folderRoutes.folderDelete(
           {
             fs: deps.fs, folderLocal: fl, getRepo: deps.getRepo, pool: deps.pool,
-            ownerPeerId: deps.identity.peerId, storeSecretKey: deps.runtime.store.secretKey,
+            ownerPeerId: deps.runtime.store.localPeerId, storeSecretKey: deps.runtime.store.secretKey,
             broadcast: deps.broadcast,
             workspace: deps.workspace,
             flushStore: async () => { if (deps.runtime.store) await deps.runtime.store.flush(); },
@@ -575,7 +583,7 @@ async function routeMessage(
         await folderRoutes.folderRescan(
           {
             fs: deps.fs, folderLocal: fl, getRepo: deps.getRepo, pool: deps.pool,
-            ownerPeerId: deps.identity.peerId, storeSecretKey: deps.runtime.store.secretKey,
+            ownerPeerId: deps.runtime.store.localPeerId, storeSecretKey: deps.runtime.store.secretKey,
             broadcast: deps.broadcast,
             workspace: deps.workspace,
             flushStore: async () => { if (deps.runtime.store) await deps.runtime.store.flush(); },

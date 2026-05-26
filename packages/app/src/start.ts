@@ -170,7 +170,11 @@ export async function startVault(): Promise<VaultHandle> {
       const fl = new FolderLocal(fsApi.path("local"));
       await fl.ready();
       runtime.folderLocal = fl;
-      await ensureCapturesFolder(fl, state, identity.peerId);
+      // Use the autobee writer key (state.selfPeerId), NOT identity.peerId,
+      // so the Captures folder's ownerPeerId matches what vault.status
+      // reports + what folder/memory records are stamped with. Keeps the
+      // web's isOwner check (f.ownerPeerId === selfPeerId) correct.
+      await ensureCapturesFolder(fl, state, state.selfPeerId);
     }
 
     const writeAudit = async (
