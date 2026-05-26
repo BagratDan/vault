@@ -38,12 +38,38 @@ const ttsPlay = z.object({
   requestId: z.string(),
 });
 
+const vaultStatus = z.object({ kind: z.literal("vault.status") });
+
+const vaultCreate = z.object({
+  kind: z.literal("vault.create"),
+  displayName: z.string().min(1),
+});
+
+const vaultInviteCreate = z.object({
+  kind: z.literal("vault.invite-create"),
+  placeholderDisplayName: z.string().optional(),
+  expiresIn: z.string().optional(), // e.g. "7d", "24h"
+});
+
+const vaultInviteAccept = z.object({
+  kind: z.literal("vault.invite-accept"),
+  token: z.string().min(1),
+  displayName: z.string().min(1),
+});
+
+const peerListReq = z.object({ kind: z.literal("peer.list") });
+
 export const clientMessageShape = z.discriminatedUnion("kind", [
   captureText,
   captureAudio,
   searchRun,
   memoryGet,
   ttsPlay,
+  vaultStatus,
+  vaultCreate,
+  vaultInviteCreate,
+  vaultInviteAccept,
+  peerListReq,
 ]);
 export type ClientMessage = z.infer<typeof clientMessageShape>;
 
@@ -99,6 +125,53 @@ const errorMsg = z.object({
   message: z.string(),
 });
 
+const vaultStatusReply = z.object({
+  kind: z.literal("vault.status"),
+  state: z.enum(["no-vault", "admin", "member"]),
+  vaultId: z.string().optional(),
+  vaultName: z.string().optional(),
+  selfPeerId: z.string().optional(),
+});
+
+const vaultCreated = z.object({
+  kind: z.literal("vault.created"),
+  vaultId: z.string(),
+  peerId: z.string(),
+});
+
+const vaultJoined = z.object({
+  kind: z.literal("vault.joined"),
+  vaultId: z.string(),
+  peerId: z.string(),
+});
+
+const inviteToken = z.object({
+  kind: z.literal("invite.token"),
+  token: z.string(),
+  expiresAt: z.string(),
+});
+
+const peerListReply = z.object({
+  kind: z.literal("peer.list"),
+  peers: z.array(
+    z.object({
+      peerId: z.string(),
+      displayName: z.string(),
+      role: z.enum(["admin", "member"]),
+    })
+  ),
+});
+
+const peerConnected = z.object({
+  kind: z.literal("peer.connected"),
+  peer: z.object({ peerId: z.string(), displayName: z.string() }),
+});
+
+const peerDisconnected = z.object({
+  kind: z.literal("peer.disconnected"),
+  peerId: z.string(),
+});
+
 export const serverMessageShape = z.discriminatedUnion("kind", [
   captureAck,
   searchHits,
@@ -107,5 +180,12 @@ export const serverMessageShape = z.discriminatedUnion("kind", [
   ttsChunk,
   ttsDone,
   errorMsg,
+  vaultStatusReply,
+  vaultCreated,
+  vaultJoined,
+  inviteToken,
+  peerListReply,
+  peerConnected,
+  peerDisconnected,
 ]);
 export type ServerMessage = z.infer<typeof serverMessageShape>;
