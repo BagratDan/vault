@@ -165,7 +165,10 @@ export async function handleSearchProbe(
   for (const h of localHits) {
     const folderId = await resolveFolderId(deps, h.memoryId);
     if (!folderId) continue; // no folder → drop (legacy/unknown)
-    if (visById.get(folderId) === "private") continue; // PRIVACY GATE
+    // Positive allowlist: only known-PUBLIC folders pass. Unknown or private
+    // folders are dropped. This makes the privacy default structural — it does
+    // not depend on listFolders() happening to return private folders.
+    if (visById.get(folderId) !== "public") continue; // PRIVACY GATE
     if (allow && !allow.has(folderId)) continue; // scope filter
     out.push({ ...h, folderId, snippet: blurPreview(h.snippet) });
   }

@@ -74,3 +74,60 @@ describe("handleSearchProbe — folder privacy gate", () => {
     expect(reply.hits[0]!.folderId).toBe(PUB_FOLDER);
   });
 });
+
+describe("handleSearchProbe — privacy gate hardening", () => {
+  it("drops a hit whose folderId is unknown (not in listFolders)", async () => {
+    const deps = makeDeps();
+    // Override: the public memory resolves to a folderId that listFolders
+    // does NOT return. Allowlist gate must drop it.
+    deps.repo = {
+      getMemory: async (id: string) =>
+        id === "01J0PUBMEM00000000000000AA"
+          ? { id: "01J0PUBMEM00000000000000AA", folderId: "01J0UNKNOWNFLD000000000AAA" }
+          : null,
+    } as never;
+    const reply = await handleSearchProbe(deps, {
+      v: 1,
+      requestId: "01J0REQ0000000000000000AAA",
+      query: "indemnification",
+      k: 5,
+    });
+    // public memory now points at an unknown folder → dropped; private → dropped
+    expect(reply.hits).toHaveLength(0);
+  });
+
+  it("drops a hit whose memory is in neither store (null folderId)", async () => {
+    const deps = makeDeps();
+    deps.repo = { getMemory: async () => null } as never;
+    deps.folderLocal = {
+      ...deps.folderLocal,
+      getPrivateMemory: async () => null,
+      listFolders: async () => [
+        { id: PUB_FOLDER, visibility: "public" },
+        { id: PRV_FOLDER, visibility: "private" },
+      ],
+      getFolder: async () => null,
+    } as never;
+    const reply = await handleSearchProbe(deps, {
+      v: 1,
+      requestId: "01J0REQ0000000000000000AAA",
+      query: "x",
+      k: 5,
+    });
+    expect(reply.hits).toHaveLength(0);
+  });
+
+  it("drops a private folder even when the requester names it in folderIds", async () => {
+    const deps = makeDeps();
+    const reply = await handleSearchProbe(deps, {
+      v: 1,
+      requestId: "01J0REQ0000000000000000AAA",
+      query: "x",
+      k: 5,
+      folderIds: [PRV_FOLDER], // maliciously name the private folder
+    });
+    // privacy drop runs before the folderIds scope filter → private stays dropped
+    expect(reply.hits.some((hh) => hh.folderId === PRV_FOLDER)).toBe(false);
+    expect(reply.hits).toHaveLength(0);
+  });
+});
