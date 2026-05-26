@@ -9,6 +9,8 @@ import { ModelStatus } from "./components/ModelStatus.js";
 import { VaultSetup } from "./components/VaultSetup.js";
 import { PeerList, type Peer } from "./components/PeerList.js";
 import { InviteTokenDisplay } from "./components/InviteTokenDisplay.js";
+import { ToastQueue } from "./components/ToastQueue.js";
+import type { IncomingRequest } from "./components/ConsentToast.js";
 import type { Hit, Citation, ClientMessage } from "./types.js";
 
 export function App() {
@@ -34,6 +36,12 @@ export function App() {
   const [inviteToken, setInviteToken] = useState<{ token: string; expiresAt: string } | null>(
     null
   );
+  const [toasts, setToasts] = useState<IncomingRequest[]>([]);
+  const [granted, setGranted] = useState<Map<string, { scope: string; text: string }>>(new Map());
+  const toastsRef = useRef<IncomingRequest[]>([]);
+  useEffect(() => {
+    toastsRef.current = toasts;
+  }, [toasts]);
   const audioQueue = useRef<{ queue: string[]; el: HTMLAudioElement | null }>({
     queue: [],
     el: null,
@@ -114,6 +122,60 @@ export function App() {
       } else if (m.kind === "error") {
         const short = m.message.length > 240 ? m.message.slice(0, 240) + "…" : m.message;
         setBanner({ kind: "error", text: `${m.code}: ${short}` });
+      } else if (m.kind === "consent.incoming") {
+        setToasts((prev) =>
+          prev.some((t) => t.consentRequestId === m.consentRequestId)
+            ? prev
+            : [
+                ...prev,
+                {
+                  consentRequestId: m.consentRequestId,
+                  requesterDisplayName: m.requesterDisplayName,
+                  memoryId: m.memoryId,
+                  memoryTitle: m.memoryTitle,
+                  scope: m.scope,
+                  expiresAt: m.expiresAt,
+                  ...(m.ratePolicy ? { ratePolicy: m.ratePolicy } : {}),
+                },
+              ]
+        );
+      } else if (m.kind === "consent.granted") {
+        let text = "";
+        if (m.scope === "snippet" && m.payload && typeof m.payload === "object" && "text" in m.payload) {
+          text = String((m.payload as { text: string }).text);
+        } else if (m.scope === "metadata" && m.payload && typeof m.payload === "object") {
+          text = JSON.stringify(m.payload);
+        } else if (m.scope === "file" && m.payload && typeof m.payload === "object" && "contentBase64" in m.payload) {
+          try {
+            text = atob(String((m.payload as { contentBase64: string }).contentBase64));
+          } catch {
+            text = "[binary]";
+          }
+        }
+        setHits((prev) => {
+          const updated = [...prev];
+          const t = toastsRef.current.find((x) => x.consentRequestId === m.consentRequestId);
+          if (!t) return updated;
+          const idx = updated.findIndex((h) => h.memoryId === t.memoryId);
+          if (idx >= 0) updated[idx] = { ...updated[idx]!, snippet: text };
+          return updated;
+        });
+        setGranted((prev) => {
+          const next = new Map(prev);
+          const t = toastsRef.current.find((x) => x.consentRequestId === m.consentRequestId);
+          if (t) next.set(t.memoryId, { scope: m.scope, text });
+          return next;
+        });
+        setToasts((prev) => prev.filter((t) => t.consentRequestId !== m.consentRequestId));
+      } else if (m.kind === "consent.denied" || m.kind === "consent.expired") {
+        setToasts((prev) => prev.filter((t) => t.consentRequestId !== m.consentRequestId));
+        if (m.kind === "consent.denied") {
+          setBanner({ kind: "error", text: `Access denied${m.reason ? ` (${m.reason})` : ""}.` });
+        } else {
+          setBanner({ kind: "info", text: `Request expired${m.reason ? ` (${m.reason})` : ""}.` });
+        }
+      } else if (m.kind === "consent.pending") {
+        // Soft ack — no UI action needed.
       } else if (m.kind === "answer.chunk") {
         setAnswer({ text: m.text, citations: [] });
       } else if (m.kind === "answer.done") {
@@ -226,16 +288,40 @@ export function App() {
       )}
 
       <div className="space-y-3">
-        {hits.map((h) => (
-          <ResultCard
-            key={h.memoryId}
-            memoryId={h.memoryId}
-            score={h.score}
-            snippet={h.snippet}
-            tags={h.tags}
-          />
-        ))}
+        {hits.map((h) => {
+          const ownerName = peers.find((p) => p.peerId === h.ownerPeerId)?.displayName;
+          const grant = granted.get(h.memoryId);
+          return (
+            <ResultCard
+              key={h.memoryId}
+              memoryId={h.memoryId}
+              score={h.score}
+              snippet={grant ? grant.text : h.snippet}
+              tags={h.tags}
+              {...(h.ownerPeerId ? { ownerPeerId: h.ownerPeerId } : {})}
+              {...(ownerName ? { ownerDisplayName: ownerName } : {})}
+              fullContentAvailable={!!grant}
+              onRequestAccess={
+                h.ownerPeerId && h.ownerPeerId !== selfPeerId
+                  ? (scope) =>
+                      send({
+                        kind: "consent.request",
+                        memoryId: h.memoryId,
+                        ownerPeerId: h.ownerPeerId!,
+                        scope,
+                      })
+                  : undefined
+              }
+            />
+          );
+        })}
       </div>
+      <ToastQueue
+        toasts={toasts}
+        onRespond={(consentRequestId, decision) =>
+          send({ kind: "consent.respond", consentRequestId, decision })
+        }
+      />
     </main>
   );
 }
