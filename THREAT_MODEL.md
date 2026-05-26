@@ -211,6 +211,25 @@ These are risks Vault cannot fully eliminate by design. Each is named here, with
 
 **Status:** This risk class **cannot occur in v1** because there's no sync at all. In Plan 2, sync ships but only for records (file bodies stay local, derivatives stay local). The threat is **eliminated by data-flow design**, not after-the-fact validation.
 
+### 4a. At-rest replication of public-folder content (Plan 4)
+
+**Risk:** Plan 4 introduces folders. A **private** folder's memories are written to an owner-local Hyperbee (`$VAULT_ROOT/local/`) and never enter the synced Autobee — they are confidential from peers at rest. A **public** folder's memory *records* (including the `body` text extracted from the file) DO replicate via Autobee to every admitted roster member, the same way Plan 1-3 memory records always have. Raw file *bytes* still never replicate (only the extracted text in the Memory record does).
+
+This means the consent gate (Plan 3) and the search-probe folder filter are **read-time controls on cooperative search**, not at-rest confidentiality. An admitted peer that inspects its own replicated Autobee view directly — rather than going through `search.probe` — can read every public-folder memory body and every typed capture (which uses the public/replicating path). The blurred-preview + per-request consent flow governs what the *UI and RPC surface* expose; it does not encrypt replicated records.
+
+**Mitigation / posture:**
+
+- **Private folders are the at-rest confidentiality boundary.** Anything that must not be readable by an admitted-but-curious peer goes in a private folder (storage-gated — never replicates). This is enforced structurally in `Repo.putMemoryByVisibility` and proven by `packages/sync/tests/two-peer-folder.test.ts` (the private memory id is never present in the synced view).
+- **Public folders are explicitly a sharing surface.** Marking a folder public is the user stating "admitted peers may search this." The consent gate then narrows *delivery* (blurred preview → snippet/file only on approval), but the owner should treat a public folder's contents as readable-at-rest by the roster.
+- Encryption-at-rest of replicated records (so even raw-view inspection yields ciphertext) is **deferred** — it requires per-record envelope encryption keyed to the roster and is sketched as future work. v1-v4 do not claim it.
+
+**Status:** Honestly bounded. The "private NEVER reaches a peer" guarantee holds for private folders (two gates, tested). The "public folder + per-memory consent" model is a *cooperative-search* control, documented here so a reviewer doesn't over-read the consent UI as at-rest encryption.
+
+**Known limitations that follow from this model (Plan 4):**
+
+- **Visibility toggle is not retroactive.** Flipping a folder public→private leaves already-replicated memories in peers' Autobee views; the owner's own probe handler stops serving them (folder is now private) but the bytes a peer already replicated are not recalled. Re-create the folder as private to fully re-route. Documented in the README.
+- **Default "Captures" folder is public.** Typed/recorded captures replicate like any public memory (as in Plans 1-3). To keep a note fully node-local, capture it into a folder marked private.
+
 ### 5. Cross-origin attack via the user's browser
 
 **Risk:** A user visits `evil.example.com` in another tab. The site's JavaScript opens a WebSocket to `ws://127.0.0.1:7421/ws` and tries to drain memories.

@@ -101,7 +101,15 @@ export async function captureText(
     // fall through and ingest as new.
   }
 
-  // 5. Persist all entities
+  // 5. Persist all entities. Typed/audio captures go through the normal
+  //    autobee path (as in Plans 1-3). NOTE: the default "Captures" folder
+  //    is labeled private in the folder list, but capture memories still
+  //    replicate via Autobee like any public-folder memory — their
+  //    confidentiality from peers rests on the per-memory consent gate
+  //    (Plan 3), not on the storage-tier gate. See THREAT_MODEL "At-rest
+  //    replication" for why this is the accepted posture. To keep a capture
+  //    fully node-local, the user puts it in a folder marked private (folder
+  //    ingest routes private-folder memories to the owner-local store).
   await deps.repo.putMemory(ext.memory);
   for (const p of ext.people) await deps.repo.putPerson(p);
   for (const pl of ext.places) await deps.repo.putPlace(pl);

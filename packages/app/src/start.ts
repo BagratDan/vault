@@ -147,10 +147,16 @@ export async function startVault(): Promise<VaultHandle> {
       kind: "folder",
       path: "(captures)",
       displayName: "Captures",
-      visibility: "private",
+      // Captures memories go through the normal autobee path (capture.ts),
+      // so they replicate + are federated-searchable like any public folder.
+      // Label it "public" so the folder's visibility matches its at-rest
+      // behavior — per-memory consent (Plan 3) still gates what peers see.
+      visibility: "public",
     };
     await fl.putFolder(f);
-    // Captures is private — no public subset written to autobee.
+    // The Captures folder record itself stays owner-local (no public subset
+    // in autobee) — peers don't need to see the folder, only its memories
+    // surface in federated search, attributed to this owner.
   }
 
   async function activateVault(state: VaultState): Promise<void> {

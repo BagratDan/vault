@@ -316,9 +316,9 @@ Plans 1–3 built the consent-gated memory model. Plan 4 turns it into a real DA
 
 - **Add folder** from the home screen — paste an absolute path (under `$HOME`), pick a display name, set visibility. Vault walks the directory and indexes every supported file.
 - **Supported file types**: PDF (via `pdfjs-dist`), DOCX (via `mammoth`), `.txt` / `.md`, and audio (`.mp3` / `.wav` / `.m4a` / `.flac` / `.ogg`) through the existing Parakeet transcription pipeline. Each file's text is extracted, embedded, and indexed locally; the raw bytes never leave your machine until a consent grant approves `scope: "file"`.
-- **Public** folders are searchable by admitted peers (still gated by per-memory consent from Plan 3 — blurred preview by default, real content only after the owner approves a `consent.request`).
-- **Private** folders are local-only. Two independent gates protect them: a **storage gate** (private memories are written to an owner-local Hyperbee under `${VAULT_ROOT}/local/`, never to the synced Autobee) and a **probe-time gate** (the peer-side `handleSearchProbe` admits only known-public folders via a positive allowlist).
-- Inside a folder, **Capture / Ask / Library are folder-scoped**. The home screen's "Ask (across all folders)" runs an unscoped federated search. Typed captures land in a default per-peer **Captures** folder.
+- **Public** folders are a sharing surface: admitted peers can search them. Delivery is governed by per-memory consent from Plan 3 (blurred preview by default; real snippet/file only after the owner approves a `consent.request`). **Important:** a public folder's memory bodies replicate via Autobee to the roster — the consent gate controls the *search/RPC surface*, not at-rest encryption. Treat a public folder's contents as readable-at-rest by admitted peers. See [THREAT_MODEL.md](THREAT_MODEL.md) §4a.
+- **Private** folders are the at-rest confidentiality boundary — local-only, never replicated. Two independent gates protect them: a **storage gate** (private memories are written to an owner-local Hyperbee under `${VAULT_ROOT}/local/`, never to the synced Autobee — proven by `packages/sync/tests/two-peer-folder.test.ts`) and a **probe-time gate** (the peer-side `handleSearchProbe` admits only known-public folders via a positive allowlist).
+- Inside a folder, **Capture / Ask / Library are folder-scoped**. The home screen's "Ask (across all folders)" runs an unscoped federated search. Typed captures land in a default per-peer **Captures** folder (public — captures replicate like any public memory, as in Plans 1-3; put a note in a private folder to keep it fully node-local).
 - **Re-scan** (manual) picks up new/changed/deleted files; **Make public/private** toggles visibility (applies to future ingests); **Delete** removes the folder from the vault without touching the files on disk.
 
 ### Running the folder demo
@@ -339,9 +339,11 @@ pnpm --filter @vault/e2e test:playwright
 - **No OCR** — image-only PDFs without a text layer produce empty bodies and are skipped.
 - **Public/private only** — no per-peer folder ACL (a folder is visible to all admitted peers or to no one).
 - **Flat folder UI** — a chosen directory is walked recursively and collapsed into one Vault folder; no nested folder navigation.
-- **Visibility toggle is not retroactive** — flipping public↔private affects future ingests only; re-scan to reroute existing memories.
+- **Visibility toggle is not retroactive** — flipping public→private stops the owner's probe handler from serving the folder, but memories already replicated to peers' Autobee views are not recalled. To fully re-route, delete + re-add the folder as private. (THREAT_MODEL §4a.)
+- **No at-rest encryption of replicated records** — public-folder bodies + typed captures replicate in cleartext to admitted peers; the consent gate controls the search/RPC surface, not raw-view inspection. Private folders are the at-rest boundary. (THREAT_MODEL §4a.)
 - **Path entry by paste** — the browser File System Access API is Chromium-only and gated, so you paste an absolute path rather than using a native picker. A desktop wrapper (Electron/Tauri) would add a native dir picker in a future version.
 - **No in-app file preview** — once a peer grants `scope: "file"`, the bytes flow as base64 and download; a built-in PDF/image viewer is deferred.
+- **Orphan embeddings on re-scan/delete** — deleted/changed files leave stale vectors in the unified embedding workspace; they're dropped from results (their tombstoned memory resolves to no live folder) but degrade recall over many re-scans. Workspace eviction is future work.
 
 ## Submission deliverables
 
