@@ -6,3 +6,5 @@ export * from "./transcribe.js";
 export * from "./embed.js";
 export * from "./llm.js";
 export * from "./tts.js";
+export * from "./extract.js";
+export * from "./dedup.js";
