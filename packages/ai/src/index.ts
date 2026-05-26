@@ -2,3 +2,7 @@ export * from "./errors.js";
 export * from "./models.js";
 export * from "./provider.js";
 export * from "./model-pool.js";
+export * from "./transcribe.js";
+export * from "./embed.js";
+export * from "./llm.js";
+export * from "./tts.js";
