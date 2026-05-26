@@ -7,12 +7,26 @@ import type { VaultRuntime } from "./routes/vault.js";
 import type { VaultFs } from "./vault-fs.js";
 import type { ModelPool } from "@vault/ai";
 import type { Workspace } from "@vault/retrieval";
-import type { Repo, Indexes } from "@vault/sync";
+import {
+  signCanonical,
+  type AuditLog,
+  type Repo,
+  type Indexes,
+  type Scope,
+} from "@vault/sync";
+import type { ConsentEvent } from "@vault/domain";
 import { captureText, captureAudio } from "./routes/capture.js";
 import { runSearch } from "./routes/search.js";
 import { getMemory } from "./routes/memory.js";
 import { streamTts } from "./routes/tts.js";
 import * as vaultRoutes from "./routes/vault.js";
+import {
+  consentRequest as consentRequestRoute,
+  consentRespond as consentRespondRoute,
+  consentListPending as consentListPendingRoute,
+  type ConsentDeps,
+} from "./routes/consent.js";
+import type { ConsentState } from "./consent-state.js";
 import { complete, type ChatMessage } from "@vault/ai";
 import { newUlid, type Ulid } from "@vault/domain";
 
@@ -36,6 +50,14 @@ export interface BridgeDeps {
   runtime: VaultRuntime;
   getRepo: () => Repo;
   getIndexes: () => Indexes;
+  /**
+   * Lazy accessors for consent + audit. Both return null until activateVault()
+   * has wired them up. Routes that require them call requireConsent() to
+   * narrow the types.
+   */
+  getConsentState: () => ConsentState | null;
+  getAudit: () => AuditLog | null;
+  selfDisplayName: () => string;
 }
 
 export interface Conn {
@@ -81,6 +103,30 @@ function requireVaultActive<T>(
     throw new Error("no-vault: Create or join a Vault first.");
   }
   return fn();
+}
+
+function requireConsent(deps: BridgeDeps): {
+  consentState: ConsentState;
+  audit: AuditLog;
+} {
+  const consentState = deps.getConsentState();
+  const audit = deps.getAudit();
+  if (!consentState || !audit) {
+    throw new Error("no-vault: Consent + audit subsystems are not active.");
+  }
+  return { consentState, audit };
+}
+
+function buildConsentDeps(deps: BridgeDeps): ConsentDeps {
+  const { consentState, audit } = requireConsent(deps);
+  return {
+    swarm: deps.runtime.swarm,
+    consentState,
+    audit,
+    getRepo: deps.getRepo,
+    selfPeerId: deps.identity.peerId,
+    selfDisplayName: deps.selfDisplayName(),
+  };
 }
 
 async function routeMessage(
@@ -254,6 +300,145 @@ async function routeMessage(
         });
       }
       return { kind: "tts.done", requestId: msg.requestId };
+    }
+
+    // ── Consent flow ─────────────────────────────────────────────────
+    case "consent.request": {
+      return requireVaultActive(deps, async () => {
+        const cdeps = buildConsentDeps(deps);
+        const r = await consentRequestRoute(cdeps, {
+          memoryId: msg.memoryId,
+          ownerPeerId: msg.ownerPeerId,
+          scope: msg.scope as Scope,
+        });
+        if (r.status === "expired") {
+          return {
+            kind: "consent.expired",
+            consentRequestId: r.consentRequestId,
+            ...(r.reason ? { reason: r.reason } : {}),
+          };
+        }
+        return { kind: "consent.pending", consentRequestId: r.consentRequestId };
+      });
+    }
+    case "consent.respond": {
+      return requireVaultActive(deps, async () => {
+        const cdeps = buildConsentDeps(deps);
+        await consentRespondRoute(cdeps, {
+          consentRequestId: msg.consentRequestId,
+          decision: msg.decision,
+        });
+        return {
+          kind: "consent.pending",
+          consentRequestId: msg.consentRequestId,
+        };
+      });
+    }
+    case "consent.list-pending": {
+      return requireVaultActive(deps, async () => {
+        const cdeps = buildConsentDeps(deps);
+        const entries = consentListPendingRoute(cdeps);
+        for (const e of entries) {
+          conn.send({
+            kind: "consent.incoming",
+            consentRequestId: e.consentRequestId,
+            requesterPeerId: e.requesterPeerId,
+            requesterDisplayName: e.requesterDisplayName,
+            memoryId: e.memoryId,
+            memoryTitle: e.memoryId,
+            scope: e.scope,
+            expiresAt: e.expiresAt,
+          });
+        }
+        return { kind: "consent.pending", consentRequestId: "list" };
+      });
+    }
+    case "audit.query": {
+      return requireVaultActive(deps, async () => {
+        const { audit } = requireConsent(deps);
+        const opts: {
+          peerId?: string;
+          since?: string;
+          limit?: number;
+        } = {};
+        if (msg.peerId !== undefined) opts.peerId = msg.peerId;
+        if (msg.since !== undefined) opts.since = msg.since;
+        if (msg.limit !== undefined) opts.limit = msg.limit;
+        const events: ConsentEvent[] = [];
+        for await (const ev of audit.list(opts)) events.push(ev);
+        return { kind: "audit.events", events };
+      });
+    }
+    case "admin.member-list": {
+      return requireVaultActive(deps, async () => {
+        if (deps.runtime.state?.role !== "admin") {
+          throw new Error("forbidden: admin role required");
+        }
+        const r = await vaultRoutes.peerList({
+          fs: deps.fs,
+          identity: deps.identity,
+          runtime: deps.runtime,
+        });
+        return {
+          kind: "admin.member-list",
+          members: r.peers.map((p) => ({
+            peerId: p.peerId,
+            displayName: p.displayName,
+            role: p.role,
+          })),
+        };
+      });
+    }
+    case "admin.revoke-member": {
+      return requireVaultActive(deps, async () => {
+        if (deps.runtime.state?.role !== "admin") {
+          throw new Error("forbidden: admin role required");
+        }
+        if (!deps.runtime.store) {
+          throw new Error("vault not active");
+        }
+        const now = new Date().toISOString();
+        const unsigned = {
+          id: newUlid(),
+          createdAt: now,
+          updatedAt: now,
+          ownerPeerId: deps.identity.peerId,
+          provenance: { kind: "user" as const },
+          vaultId: deps.runtime.state.vaultId,
+          targetPeerId: msg.targetPeerId,
+          issuedBy: deps.runtime.state.selfPeerId,
+          effectiveAt: now,
+          ...(msg.reason ? { reason: msg.reason } : {}),
+        };
+        const sig = signCanonical(unsigned, deps.runtime.store.secretKey);
+        await deps.runtime.store.append({
+          kind: "revocation",
+          key: `revocation/${unsigned.id}`,
+          value: { ...unsigned, sig },
+        });
+        await deps.runtime.store.flush();
+        return { kind: "admin.revoke-ack", targetPeerId: msg.targetPeerId };
+      });
+    }
+    case "memory.update-scopes": {
+      return requireVaultActive(deps, async () => {
+        const repo = deps.getRepo();
+        const memory = await repo.getMemory(msg.memoryId as Ulid);
+        if (!memory) {
+          return {
+            kind: "error",
+            code: "not-found",
+            message: msg.memoryId,
+          };
+        }
+        const updated = {
+          ...memory,
+          requestableScopes: msg.requestableScopes,
+          updatedAt: new Date().toISOString(),
+        };
+        await repo.putMemory(updated);
+        return { kind: "capture.ack", memoryId: memory.id };
+      });
     }
   }
 }

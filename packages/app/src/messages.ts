@@ -59,6 +59,38 @@ const vaultInviteAccept = z.object({
 
 const peerListReq = z.object({ kind: z.literal("peer.list") });
 
+const consentRequestSchema = z.object({
+  kind: z.literal("consent.request"),
+  memoryId: z.string().min(1),
+  ownerPeerId: z.string().min(1),
+  scope: z.enum(["metadata", "snippet", "file"]),
+});
+const consentRespondSchema = z.object({
+  kind: z.literal("consent.respond"),
+  consentRequestId: z.string().min(1),
+  decision: z.enum(["approve-snippet", "approve-file", "approve-metadata", "deny"]),
+});
+const consentListPendingSchema = z.object({
+  kind: z.literal("consent.list-pending"),
+});
+const auditQuerySchema = z.object({
+  kind: z.literal("audit.query"),
+  peerId: z.string().optional(),
+  since: z.string().optional(),
+  limit: z.number().int().positive().optional(),
+});
+const adminMemberListSchema = z.object({ kind: z.literal("admin.member-list") });
+const adminRevokeMemberSchema = z.object({
+  kind: z.literal("admin.revoke-member"),
+  targetPeerId: z.string().min(1),
+  reason: z.string().optional(),
+});
+const memoryUpdateScopesSchema = z.object({
+  kind: z.literal("memory.update-scopes"),
+  memoryId: z.string().min(1),
+  requestableScopes: z.array(z.enum(["metadata", "snippet", "file"])).min(1),
+});
+
 export const clientMessageShape = z.discriminatedUnion("kind", [
   captureText,
   captureAudio,
@@ -70,6 +102,13 @@ export const clientMessageShape = z.discriminatedUnion("kind", [
   vaultInviteCreate,
   vaultInviteAccept,
   peerListReq,
+  consentRequestSchema,
+  consentRespondSchema,
+  consentListPendingSchema,
+  auditQuerySchema,
+  adminMemberListSchema,
+  adminRevokeMemberSchema,
+  memoryUpdateScopesSchema,
 ]);
 export type ClientMessage = z.infer<typeof clientMessageShape>;
 
@@ -172,6 +211,60 @@ const peerDisconnected = z.object({
   peerId: z.string(),
 });
 
+const consentPendingReply = z.object({
+  kind: z.literal("consent.pending"),
+  consentRequestId: z.string(),
+});
+const consentIncomingReply = z.object({
+  kind: z.literal("consent.incoming"),
+  consentRequestId: z.string(),
+  requesterPeerId: z.string(),
+  requesterDisplayName: z.string(),
+  memoryId: z.string(),
+  memoryTitle: z.string(),
+  scope: z.enum(["metadata", "snippet", "file"]),
+  ratePolicy: z.enum(["normal", "warned", "paused"]).optional(),
+  expiresAt: z.number(),
+});
+const consentGrantedReply = z.object({
+  kind: z.literal("consent.granted"),
+  consentRequestId: z.string(),
+  scope: z.enum(["metadata", "snippet", "file"]),
+  payload: z.unknown(),
+});
+const consentDeniedReply = z.object({
+  kind: z.literal("consent.denied"),
+  consentRequestId: z.string(),
+  reason: z.string().optional(),
+});
+const consentExpiredReply = z.object({
+  kind: z.literal("consent.expired"),
+  consentRequestId: z.string(),
+  reason: z.string().optional(),
+});
+const auditEventsReply = z.object({
+  kind: z.literal("audit.events"),
+  events: z.array(z.unknown()),
+});
+const adminMemberListReply = z.object({
+  kind: z.literal("admin.member-list"),
+  members: z.array(
+    z.object({
+      peerId: z.string(),
+      displayName: z.string(),
+      role: z.enum(["admin", "member"]),
+      admittedAt: z.string().optional(),
+      revoked: z
+        .object({ at: z.string(), reason: z.string().optional() })
+        .optional(),
+    })
+  ),
+});
+const adminRevokeAckReply = z.object({
+  kind: z.literal("admin.revoke-ack"),
+  targetPeerId: z.string(),
+});
+
 export const serverMessageShape = z.discriminatedUnion("kind", [
   captureAck,
   searchHits,
@@ -187,5 +280,13 @@ export const serverMessageShape = z.discriminatedUnion("kind", [
   peerListReply,
   peerConnected,
   peerDisconnected,
+  consentPendingReply,
+  consentIncomingReply,
+  consentGrantedReply,
+  consentDeniedReply,
+  consentExpiredReply,
+  auditEventsReply,
+  adminMemberListReply,
+  adminRevokeAckReply,
 ]);
 export type ServerMessage = z.infer<typeof serverMessageShape>;

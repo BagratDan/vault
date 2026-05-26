@@ -22,7 +22,27 @@ export type ClientMessage =
   | { kind: "vault.create"; displayName: string }
   | { kind: "vault.invite-create"; placeholderDisplayName?: string; expiresIn?: string }
   | { kind: "vault.invite-accept"; token: string; displayName: string }
-  | { kind: "peer.list" };
+  | { kind: "peer.list" }
+  | {
+      kind: "consent.request";
+      memoryId: string;
+      ownerPeerId: string;
+      scope: "metadata" | "snippet" | "file";
+    }
+  | {
+      kind: "consent.respond";
+      consentRequestId: string;
+      decision: "approve-snippet" | "approve-file" | "approve-metadata" | "deny";
+    }
+  | { kind: "consent.list-pending" }
+  | { kind: "audit.query"; peerId?: string; since?: string; limit?: number }
+  | { kind: "admin.member-list" }
+  | { kind: "admin.revoke-member"; targetPeerId: string; reason?: string }
+  | {
+      kind: "memory.update-scopes";
+      memoryId: string;
+      requestableScopes: Array<"metadata" | "snippet" | "file">;
+    };
 
 export interface Hit {
   memoryId: string;
@@ -51,4 +71,36 @@ export type ServerMessage =
   | { kind: "invite.token"; token: string; expiresAt: string }
   | { kind: "peer.list"; peers: Array<{ peerId: string; displayName: string; role: "admin" | "member" }> }
   | { kind: "peer.connected"; peer: { peerId: string; displayName: string } }
-  | { kind: "peer.disconnected"; peerId: string };
+  | { kind: "peer.disconnected"; peerId: string }
+  | { kind: "consent.pending"; consentRequestId: string }
+  | {
+      kind: "consent.incoming";
+      consentRequestId: string;
+      requesterPeerId: string;
+      requesterDisplayName: string;
+      memoryId: string;
+      memoryTitle: string;
+      scope: "metadata" | "snippet" | "file";
+      ratePolicy?: "normal" | "warned" | "paused";
+      expiresAt: number;
+    }
+  | {
+      kind: "consent.granted";
+      consentRequestId: string;
+      scope: "metadata" | "snippet" | "file";
+      payload: unknown;
+    }
+  | { kind: "consent.denied"; consentRequestId: string; reason?: string }
+  | { kind: "consent.expired"; consentRequestId: string; reason?: string }
+  | { kind: "audit.events"; events: unknown[] }
+  | {
+      kind: "admin.member-list";
+      members: Array<{
+        peerId: string;
+        displayName: string;
+        role: "admin" | "member";
+        admittedAt?: string;
+        revoked?: { at: string; reason?: string };
+      }>;
+    }
+  | { kind: "admin.revoke-ack"; targetPeerId: string };

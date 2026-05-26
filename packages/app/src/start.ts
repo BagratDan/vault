@@ -3,6 +3,7 @@ import path from "node:path";
 import { createSidecarServer } from "@vault/net";
 import { Provider, ModelPool } from "@vault/ai";
 import {
+  AuditLog,
   Indexes,
   Repo,
   SwarmTransport,
@@ -12,7 +13,7 @@ import {
   type MemberClaim,
 } from "@vault/sync";
 import { Workspace } from "@vault/retrieval";
-import { newUlid } from "@vault/domain";
+import { newUlid, type ConsentEvent } from "@vault/domain";
 import b4a from "b4a";
 import { loadConfig } from "./config.js";
 import { VaultFs } from "./vault-fs.js";
@@ -21,6 +22,7 @@ import { readVaultState, type VaultState } from "./vault-state.js";
 import { makeRouter, type BridgeDeps } from "./ws-bridge.js";
 import { handleSearchProbe } from "./routes/search.js";
 import type { VaultRuntime } from "./routes/vault.js";
+import { ConsentState } from "./consent-state.js";
 
 export interface VaultHandle {
   port: number;
@@ -34,6 +36,7 @@ export async function startVault(): Promise<VaultHandle> {
   const fsApi = new VaultFs(cfg.vaultRoot);
   await fsApi.ensureDir("data");
   await fsApi.ensureDir("audio");
+  await fsApi.ensureDir("audit");
 
   const identity = await loadOrCreateIdentity(fsApi);
 
@@ -59,6 +62,9 @@ export async function startVault(): Promise<VaultHandle> {
 
   const runtime: VaultRuntime = { store: null, swarm: null, state: null };
 
+  let consentState: ConsentState | null = null;
+  let audit: AuditLog | null = null;
+
   // The RPC handler dispatches inbound RPC messages from connected peers.
   // Currently: search.probe (federated search). Plan 3 will add consent.request.
   const rpcHandler = async (method: string, params: unknown): Promise<unknown> => {
@@ -73,6 +79,38 @@ export async function startVault(): Promise<VaultHandle> {
   let broadcastToClients: (msg: unknown) => void = () => undefined;
 
   async function activateVault(state: VaultState): Promise<void> {
+    if (!audit) {
+      const auditInst = new AuditLog(fsApi.path("audit"));
+      await auditInst.ready();
+      audit = auditInst;
+    }
+    if (!consentState) {
+      consentState = new ConsentState({
+        onExpire: (consentRequestId) => {
+          broadcastToClients({ kind: "consent.expired", consentRequestId });
+        },
+      });
+    }
+
+    const writeAudit = async (
+      partial: Omit<ConsentEvent, "id" | "createdAt" | "updatedAt" | "provenance">
+    ): Promise<void> => {
+      if (!audit) return;
+      const now = new Date().toISOString();
+      const ev = {
+        id: newUlid(),
+        createdAt: now,
+        updatedAt: now,
+        provenance: { kind: "user" as const },
+        ...partial,
+      } as ConsentEvent;
+      try {
+        await audit.append(ev);
+      } catch (err) {
+        console.warn("[vault] audit append failed:", err);
+      }
+    };
+
     const swarm = new SwarmTransport(
       (method, params) => rpcHandler(method, params),
       {
@@ -147,6 +185,105 @@ export async function startVault(): Promise<VaultHandle> {
           });
           await runtime.store.flush();
         },
+        // Owner side: a remote peer requested access to one of our memories.
+        onConsentRequest: async (peerId, req) => {
+          if (!runtime.store || !consentState) return;
+          const repo = new Repo({
+            view: runtime.store.view,
+            append: runtime.store.append,
+            ownerPeerId: identity.peerId,
+          });
+          const memory = await repo.getMemory(req.memoryId as never);
+          if (!memory) {
+            // Memory not found — deny immediately
+            try {
+              await swarm.sendConsent(peerId, {
+                v: 1,
+                method: "consent.response",
+                consentRequestId: req.consentRequestId,
+                kind: "deny",
+                reason: "memory-not-found",
+              });
+            } catch {
+              // best-effort
+            }
+            await writeAudit({
+              requesterPeerId: peerId,
+              ownerPeerId: identity.peerId,
+              resourceId: req.memoryId,
+              kind: "deny",
+            });
+            return;
+          }
+          const now = Date.now();
+          const requesterDisplayName = req.requesterDisplayName;
+          consentState.set({
+            consentRequestId: req.consentRequestId,
+            requesterPeerId: peerId,
+            ownerPeerId: identity.peerId,
+            memoryId: req.memoryId,
+            scope: req.scope,
+            requesterDisplayName,
+            requestedAt: req.ts,
+          });
+          broadcastToClients({
+            kind: "consent.incoming",
+            consentRequestId: req.consentRequestId,
+            requesterPeerId: peerId,
+            requesterDisplayName,
+            memoryId: req.memoryId,
+            memoryTitle: memory.summary ?? req.memoryId,
+            scope: req.scope,
+            expiresAt: now + 5 * 60 * 1000,
+          });
+          await writeAudit({
+            requesterPeerId: peerId,
+            ownerPeerId: identity.peerId,
+            resourceId: req.memoryId,
+            kind: "request",
+          });
+        },
+        // Requester side: the owner has decided (approve / deny / expire).
+        onConsentResponse: async (peerId, res) => {
+          const SENTINEL_ID = "00000000000000000000000000";
+          if (res.kind === "approve") {
+            broadcastToClients({
+              kind: "consent.granted",
+              consentRequestId: res.consentRequestId,
+              scope: res.scope,
+              payload: res.payload,
+            });
+            const kind: ConsentEvent["kind"] =
+              res.scope === "metadata"
+                ? "approve-metadata"
+                : res.scope === "snippet"
+                  ? "approve-snippet"
+                  : "approve-file";
+            await writeAudit({
+              requesterPeerId: identity.peerId,
+              ownerPeerId: peerId,
+              resourceId: SENTINEL_ID,
+              kind,
+            });
+          } else if (res.kind === "deny") {
+            broadcastToClients({
+              kind: "consent.denied",
+              consentRequestId: res.consentRequestId,
+              ...(res.reason ? { reason: res.reason } : {}),
+            });
+            await writeAudit({
+              requesterPeerId: identity.peerId,
+              ownerPeerId: peerId,
+              resourceId: SENTINEL_ID,
+              kind: "deny",
+            });
+          } else {
+            broadcastToClients({
+              kind: "consent.expired",
+              consentRequestId: res.consentRequestId,
+            });
+          }
+        },
       }
     );
     await swarm.join(state.topic);
@@ -201,6 +338,10 @@ export async function startVault(): Promise<VaultHandle> {
     runtime,
     getRepo,
     getIndexes,
+    getConsentState: () => consentState,
+    getAudit: () => audit,
+    selfDisplayName: () =>
+      runtime.state?.displayName ?? identity.peerId.slice(0, 8),
   };
 
   const router = makeRouter(bridgeDeps);
@@ -223,6 +364,8 @@ export async function startVault(): Promise<VaultHandle> {
       await server.close();
       if (runtime.swarm) await runtime.swarm.close();
       if (runtime.store) await runtime.store.close();
+      consentState?.dispose();
+      if (audit) await audit.close();
       await workspace.close();
       await pool.unloadAll();
       await provider.stop();
