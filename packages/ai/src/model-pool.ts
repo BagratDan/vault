@@ -35,6 +35,11 @@ export interface ModelPoolOptions {
 
 export class ModelPool {
   private resident = new Map<string, ResidentEntry>();
+  /** In-flight load promises keyed by handle.id. Shared between concurrent
+   *  callers so the SDK only sees one loadModel per handle. Removing this
+   *  caused MODEL_ALREADY_REGISTERED when two routes asked for the embed
+   *  model in parallel before the first load completed. */
+  private loading = new Map<string, Promise<string>>();
   private readonly opts: {
     memoryPressureFloor: number;
     onMemoryPressure?: ModelPoolOptions["onMemoryPressure"];
@@ -50,7 +55,7 @@ export class ModelPool {
   /**
    * Load `handle` if not resident, then call `fn` with the SDK-assigned
    * modelId string. The id is what every other SDK call (completion,
-   * embed, transcribe, textToSpeech, ragIngest, ragSearch) expects.
+   * embed, transcribe, textToSpeech, ragSaveEmbeddings, ragSearch) expects.
    */
   async withModel<T>(
     handle: ModelHandle,
@@ -61,15 +66,28 @@ export class ModelPool {
     return fn(modelId);
   }
 
-  /** Ensure the handle is resident; return its SDK modelId. */
+  /** Ensure the handle is resident; return its SDK modelId. Concurrent
+   *  callers for the same handle share a single in-flight load promise. */
   async ensure(handle: ModelHandle): Promise<string> {
     const existing = this.resident.get(handle.id);
     if (existing) return existing.modelId;
 
+    const inFlight = this.loading.get(handle.id);
+    if (inFlight) return inFlight;
+
+    const promise = this.doLoad(handle);
+    this.loading.set(handle.id, promise);
+    try {
+      return await promise;
+    } finally {
+      this.loading.delete(handle.id);
+    }
+  }
+
+  private async doLoad(handle: ModelHandle): Promise<string> {
     if (handle.size === "large") {
       await this.evictLargeResidents();
     }
-
     let modelId: string;
     try {
       const opts: {
