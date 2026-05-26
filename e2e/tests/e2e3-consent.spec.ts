@@ -153,7 +153,7 @@ describe("E2E-3: two sidecars consent round-trip", () => {
         "capture.ack"
       );
       const memoryId = aCap["memoryId"] as string;
-      const aVaultId = aCreated["vaultId"];
+      expect(aCreated["vaultId"]).toBeTruthy();
 
       // B searches — gets a blurred hit
       const bHits = (await ask(
