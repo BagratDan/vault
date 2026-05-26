@@ -29,10 +29,7 @@ const PREFIX = {
   source: "src/",
 } as const;
 
-// Minimal Hyperbee interface we depend on. Avoids pulling in the
-// untyped Hyperbee module's surface.
-interface BeeLike {
-  put(key: string, value: unknown): Promise<void>;
+interface View {
   get(key: string): Promise<{ value: unknown } | null>;
   createReadStream(opts: {
     gte?: string;
@@ -40,17 +37,27 @@ interface BeeLike {
   }): AsyncIterable<{ key: string; value: unknown }>;
 }
 
-export class Repo {
-  private readonly bee: BeeLike;
+export interface RepoDeps {
+  view: View;
+  append: (op: unknown) => Promise<void>;
+  ownerPeerId: string;
+}
 
-  constructor(bee: unknown) {
-    this.bee = bee as BeeLike;
+export class Repo {
+  private readonly view: View;
+  private readonly append: (op: unknown) => Promise<void>;
+  private readonly ownerPeerId: string;
+
+  constructor(deps: RepoDeps) {
+    this.view = deps.view;
+    this.append = deps.append;
+    this.ownerPeerId = deps.ownerPeerId;
   }
 
   // Memory ----------------------------------------------------------------
   async putMemory(m: Memory): Promise<void> {
     memoryShape.parse(m);
-    await this.bee.put(`${PREFIX.memory}${m.id}`, m);
+    await this.append({ kind: "memory", key: `${PREFIX.memory}${m.id}`, value: m });
   }
   async getMemory(id: Ulid): Promise<Memory | null> {
     return this.getOne(`${PREFIX.memory}${id}`, (raw) => memoryShape.parse(raw));
@@ -62,7 +69,7 @@ export class Repo {
   // Person ----------------------------------------------------------------
   async putPerson(p: Person): Promise<void> {
     personShape.parse(p);
-    await this.bee.put(`${PREFIX.person}${p.id}`, p);
+    await this.append({ kind: "person", key: `${PREFIX.person}${p.id}`, value: p });
   }
   async listPersons(): Promise<Person[]> {
     return this.listPrefix(PREFIX.person, (raw) => personShape.parse(raw));
@@ -71,7 +78,7 @@ export class Repo {
   // Place -----------------------------------------------------------------
   async putPlace(p: Place): Promise<void> {
     placeShape.parse(p);
-    await this.bee.put(`${PREFIX.place}${p.id}`, p);
+    await this.append({ kind: "place", key: `${PREFIX.place}${p.id}`, value: p });
   }
   async listPlaces(): Promise<Place[]> {
     return this.listPrefix(PREFIX.place, (raw) => placeShape.parse(raw));
@@ -80,7 +87,7 @@ export class Repo {
   // Event -----------------------------------------------------------------
   async putEvent(e: Event): Promise<void> {
     eventShape.parse(e);
-    await this.bee.put(`${PREFIX.event}${e.id}`, e);
+    await this.append({ kind: "event", key: `${PREFIX.event}${e.id}`, value: e });
   }
   async listEvents(): Promise<Event[]> {
     return this.listPrefix(PREFIX.event, (raw) => eventShape.parse(raw));
@@ -89,7 +96,7 @@ export class Repo {
   // Task ------------------------------------------------------------------
   async putTask(t: Task): Promise<void> {
     taskShape.parse(t);
-    await this.bee.put(`${PREFIX.task}${t.id}`, t);
+    await this.append({ kind: "task", key: `${PREFIX.task}${t.id}`, value: t });
   }
   async listTasks(): Promise<Task[]> {
     return this.listPrefix(PREFIX.task, (raw) => taskShape.parse(raw));
@@ -98,19 +105,19 @@ export class Repo {
   // ExternalRef -----------------------------------------------------------
   async putExternalRef(r: ExternalRef): Promise<void> {
     externalRefShape.parse(r);
-    await this.bee.put(`${PREFIX.externalRef}${r.id}`, r);
+    await this.append({ kind: "external-ref", key: `${PREFIX.externalRef}${r.id}`, value: r });
   }
 
   // Relationship ----------------------------------------------------------
   async putRelationship(r: Relationship): Promise<void> {
     relationshipShape.parse(r);
-    await this.bee.put(`${PREFIX.relationship}${r.id}`, r);
+    await this.append({ kind: "relationship", key: `${PREFIX.relationship}${r.id}`, value: r });
   }
 
   // SourceRecord ----------------------------------------------------------
   async putSourceRecord(s: SourceRecord): Promise<void> {
     sourceRecordShape.parse(s);
-    await this.bee.put(`${PREFIX.source}${s.id}`, s);
+    await this.append({ kind: "source-record", key: `${PREFIX.source}${s.id}`, value: s });
   }
   async getSourceRecord(id: Ulid): Promise<SourceRecord | null> {
     return this.getOne(`${PREFIX.source}${id}`, (raw) => sourceRecordShape.parse(raw));
@@ -118,14 +125,14 @@ export class Repo {
 
   // -----------------------------------------------------------------------
   private async getOne<T>(key: string, parse: (raw: unknown) => T): Promise<T | null> {
-    const node = await this.bee.get(key);
+    const node = await this.view.get(key);
     if (!node) return null;
     return parse(node.value);
   }
 
   private async listPrefix<T>(prefix: string, parse: (raw: unknown) => T): Promise<T[]> {
     const results: T[] = [];
-    for await (const node of this.bee.createReadStream({
+    for await (const node of this.view.createReadStream({
       gte: prefix,
       lt: prefix + "~",
     })) {

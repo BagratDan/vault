@@ -1,5 +1,4 @@
-interface BeeLike {
-  put(key: string, value: unknown): Promise<void>;
+interface View {
   createReadStream(opts: {
     gte?: string;
     lt?: string;
@@ -16,48 +15,57 @@ function encodeSegment(s: string): string {
   return encodeURIComponent(s);
 }
 
-export class Indexes {
-  private readonly bee: BeeLike;
+export interface IndexesDeps {
+  view: View;
+  append: (op: unknown) => Promise<void>;
+}
 
-  constructor(bee: unknown) {
-    this.bee = bee as BeeLike;
+export class Indexes {
+  private readonly view: View;
+  private readonly append: (op: unknown) => Promise<void>;
+
+  constructor(deps: IndexesDeps) {
+    this.view = deps.view;
+    this.append = deps.append;
   }
 
   async indexTags(memoryId: string, tags: readonly string[]): Promise<void> {
     for (const tag of tags) {
-      await this.bee.put(
-        `idx/tag/${encodeSegment(tag)}/${memoryId}`,
-        { memoryId }
-      );
+      await this.append({
+        kind: "index",
+        key: `idx/tag/${encodeSegment(tag)}/${memoryId}`,
+        value: { memoryId },
+      });
     }
   }
 
   async indexPersons(memoryId: string, personIds: readonly string[]): Promise<void> {
     for (const pid of personIds) {
-      await this.bee.put(
-        `idx/person/${encodeSegment(pid)}/${memoryId}`,
-        { memoryId }
-      );
+      await this.append({
+        kind: "index",
+        key: `idx/person/${encodeSegment(pid)}/${memoryId}`,
+        value: { memoryId },
+      });
     }
   }
 
   async memoryIdsForTag(tag: string): Promise<string[]> {
-    return this.listMemoryIdsWithPrefix(`idx/tag/${encodeSegment(tag)}/`);
+    return this.listIds(`idx/tag/${encodeSegment(tag)}/`);
   }
 
   async memoryIdsForPerson(personId: string): Promise<string[]> {
-    return this.listMemoryIdsWithPrefix(`idx/person/${encodeSegment(personId)}/`);
+    return this.listIds(`idx/person/${encodeSegment(personId)}/`);
   }
 
-  private async listMemoryIdsWithPrefix(prefix: string): Promise<string[]> {
-    const ids: string[] = [];
-    for await (const node of this.bee.createReadStream({
+  private async listIds(prefix: string): Promise<string[]> {
+    const out: string[] = [];
+    for await (const node of this.view.createReadStream({
       gte: prefix,
       lt: prefix + "~",
     })) {
-      const value = node.value as { memoryId: string };
-      ids.push(value.memoryId);
+      const v = node.value as { memoryId: string };
+      out.push(v.memoryId);
     }
-    return ids;
+    return out;
   }
 }
