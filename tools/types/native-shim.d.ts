@@ -86,3 +86,24 @@ declare module "hypercore-crypto" {
   export function discoveryKey(publicKey: Uint8Array): Uint8Array;
   export function namespace(name: string, count?: number): Uint8Array[];
 }
+
+declare module "hypercore" {
+  interface HypercoreOpts {
+    valueEncoding?: "json" | "binary" | "utf-8";
+    createIfMissing?: boolean;
+  }
+  class Hypercore {
+    constructor(storage: string, opts?: HypercoreOpts);
+    ready(): Promise<void>;
+    append(block: unknown): Promise<number>;
+    get length(): number;
+    get(index: number): Promise<unknown>;
+    createReadStream(opts?: {
+      start?: number;
+      end?: number;
+      live?: boolean;
+    }): AsyncIterable<unknown>;
+    close(): Promise<void>;
+  }
+  export default Hypercore;
+}
