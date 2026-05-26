@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run --exclude '**/e2e2-multipeer.spec.ts'",
+    "test:multipeer": "vitest run e2e2-multipeer.spec.ts",
     "test:playwright": "playwright test"
   },
   "dependencies": {
