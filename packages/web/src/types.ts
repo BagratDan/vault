@@ -15,6 +15,7 @@ export type ClientMessage =
         createdBefore?: string;
         personId?: string;
       };
+      folderIds?: string[];
     }
   | { kind: "memory.get"; memoryId: string }
   | { kind: "memory.list"; limit?: number }
@@ -43,7 +44,12 @@ export type ClientMessage =
       kind: "memory.update-scopes";
       memoryId: string;
       requestableScopes: Array<"metadata" | "snippet" | "file">;
-    };
+    }
+  | { kind: "folder.add"; path: string; displayName: string; visibility: "public" | "private" }
+  | { kind: "folder.list" }
+  | { kind: "folder.update"; folderId: string; visibility?: "public" | "private"; displayName?: string }
+  | { kind: "folder.delete"; folderId: string }
+  | { kind: "folder.rescan"; folderId: string };
 
 export interface Hit {
   memoryId: string;
@@ -51,6 +57,7 @@ export interface Hit {
   snippet: string;
   ownerPeerId?: string;
   tags: string[];
+  folderId?: string;
 }
 
 export interface Citation {
@@ -71,6 +78,7 @@ export type ServerMessage =
         createdAt: string;
         ownerPeerId: string;
         confidence: number;
+        folderId: string;
       }>;
     }
   | { kind: "answer.chunk"; requestId: string; text: string }
@@ -116,4 +124,10 @@ export type ServerMessage =
         revoked?: { at: string; reason?: string };
       }>;
     }
-  | { kind: "admin.revoke-ack"; targetPeerId: string };
+  | { kind: "admin.revoke-ack"; targetPeerId: string }
+  | { kind: "folder.list"; folders: Array<{ folderId: string; displayName: string; visibility: "public" | "private"; ownerPeerId: string; fileCount: number; createdAt: string; path?: string }> }
+  | { kind: "folder.added"; folderId: string; displayName: string }
+  | { kind: "folder.ingest-progress"; folderId: string; current: number; total: number; phase: "scanning" | "extracting" | "embedding" | "done"; currentFile?: string }
+  | { kind: "folder.ingest-done"; folderId: string; ingested: number; skipped: number; errors: number }
+  | { kind: "folder.updated"; folderId: string }
+  | { kind: "folder.deleted"; folderId: string };

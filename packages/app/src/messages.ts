@@ -25,6 +25,7 @@ const searchRun = z.object({
       personId: z.string().optional(),
     })
     .optional(),
+  folderIds: z.array(z.string()).optional(),
 });
 
 const memoryGet = z.object({
@@ -96,6 +97,28 @@ const memoryUpdateScopesSchema = z.object({
   requestableScopes: z.array(z.enum(["metadata", "snippet", "file"])).min(1),
 });
 
+const folderAddSchema = z.object({
+  kind: z.literal("folder.add"),
+  path: z.string().min(1),
+  displayName: z.string().min(1),
+  visibility: z.enum(["public", "private"]),
+});
+const folderListReqSchema = z.object({ kind: z.literal("folder.list") });
+const folderUpdateSchema = z.object({
+  kind: z.literal("folder.update"),
+  folderId: z.string().min(1),
+  visibility: z.enum(["public", "private"]).optional(),
+  displayName: z.string().min(1).optional(),
+});
+const folderDeleteSchema = z.object({
+  kind: z.literal("folder.delete"),
+  folderId: z.string().min(1),
+});
+const folderRescanSchema = z.object({
+  kind: z.literal("folder.rescan"),
+  folderId: z.string().min(1),
+});
+
 export const clientMessageShape = z.discriminatedUnion("kind", [
   captureText,
   captureAudio,
@@ -115,6 +138,11 @@ export const clientMessageShape = z.discriminatedUnion("kind", [
   adminMemberListSchema,
   adminRevokeMemberSchema,
   memoryUpdateScopesSchema,
+  folderAddSchema,
+  folderListReqSchema,
+  folderUpdateSchema,
+  folderDeleteSchema,
+  folderRescanSchema,
 ]);
 export type ClientMessage = z.infer<typeof clientMessageShape>;
 
@@ -134,6 +162,7 @@ const searchHits = z.object({
       snippet: z.string(),
       ownerPeerId: z.string().optional(),
       tags: z.array(z.string()),
+      folderId: z.string().optional(),
     })
   ),
 });
@@ -149,6 +178,7 @@ const memoryListReply = z.object({
       createdAt: z.string(),
       ownerPeerId: z.string(),
       confidence: z.number(),
+      folderId: z.string(),
     })
   ),
 });
@@ -286,6 +316,49 @@ const adminRevokeAckReply = z.object({
   targetPeerId: z.string(),
 });
 
+const folderListReplySchema = z.object({
+  kind: z.literal("folder.list"),
+  folders: z.array(
+    z.object({
+      folderId: z.string(),
+      displayName: z.string(),
+      visibility: z.enum(["public", "private"]),
+      ownerPeerId: z.string(),
+      fileCount: z.number().int().nonnegative(),
+      createdAt: z.string(),
+      path: z.string().optional(),
+    })
+  ),
+});
+const folderAddedReplySchema = z.object({
+  kind: z.literal("folder.added"),
+  folderId: z.string(),
+  displayName: z.string(),
+});
+const folderIngestProgressSchema = z.object({
+  kind: z.literal("folder.ingest-progress"),
+  folderId: z.string(),
+  current: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative(),
+  phase: z.enum(["scanning", "extracting", "embedding", "done"]),
+  currentFile: z.string().optional(),
+});
+const folderIngestDoneSchema = z.object({
+  kind: z.literal("folder.ingest-done"),
+  folderId: z.string(),
+  ingested: z.number().int().nonnegative(),
+  skipped: z.number().int().nonnegative(),
+  errors: z.number().int().nonnegative(),
+});
+const folderUpdatedReplySchema = z.object({
+  kind: z.literal("folder.updated"),
+  folderId: z.string(),
+});
+const folderDeletedReplySchema = z.object({
+  kind: z.literal("folder.deleted"),
+  folderId: z.string(),
+});
+
 export const serverMessageShape = z.discriminatedUnion("kind", [
   captureAck,
   searchHits,
@@ -310,5 +383,11 @@ export const serverMessageShape = z.discriminatedUnion("kind", [
   auditEventsReply,
   adminMemberListReply,
   adminRevokeAckReply,
+  folderListReplySchema,
+  folderAddedReplySchema,
+  folderIngestProgressSchema,
+  folderIngestDoneSchema,
+  folderUpdatedReplySchema,
+  folderDeletedReplySchema,
 ]);
 export type ServerMessage = z.infer<typeof serverMessageShape>;
