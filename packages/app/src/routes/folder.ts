@@ -183,7 +183,6 @@ async function runIngest(deps: FolderRoutesDeps, folder: Folder): Promise<void> 
         // Embedding is best-effort per file; a failure here shouldn't abort
         // the whole folder ingest. The memory is still stored; it just won't
         // be searchable until a re-scan.
-        // eslint-disable-next-line no-console
         console.warn("[vault] folder ingest: embed failed for", memory.id, err);
       }
       ingested++;
