@@ -1,13 +1,20 @@
-import { newUlid, asUlid, type SourceRecord } from "@vault/domain";
+import {
+  newUlid,
+  asUlid,
+  type SourceRecord,
+  type Relationship,
+} from "@vault/domain";
 import { extractFromText, transcribeAudio, type ModelPool } from "@vault/ai";
 import { Repo, Indexes } from "@vault/sync";
-import { Workspace } from "@vault/retrieval";
+import { Workspace, search } from "@vault/retrieval";
+import { VaultFs } from "../vault-fs.js";
 
 export interface CaptureDeps {
   pool: ModelPool;
   repo: Repo;
   indexes: Indexes;
   workspace: Workspace;
+  fs: VaultFs;
   ownerPeerId: string;
 }
 
@@ -45,7 +52,42 @@ export async function captureText(
     ownerPeerId: deps.ownerPeerId,
   });
 
-  // 3. Persist all entities
+  // 3. Dedup check (spec §9.3 step 6). Query @qvac/rag for the top-1
+  // existing memory matching the new body; if its similarity score is
+  // at or above the threshold, we DON'T ingest a new memory — instead
+  // we link the existing one with a Relationship(type='duplicate-of').
+  // The candidate Memory is dropped; the SourceRecord we already wrote
+  // remains as evidence of the duplicate capture.
+  const DEDUP_THRESHOLD = 0.92;
+  let duplicateOf: string | undefined;
+  try {
+    const hits = await search({
+      workspace: deps.workspace.getName(),
+      query: ext.memory.body,
+      k: 1,
+    });
+    const top = hits[0];
+    if (top && top.score >= DEDUP_THRESHOLD) {
+      duplicateOf = top.memoryId;
+      const rel: Relationship = {
+        id: newUlid(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        ownerPeerId: deps.ownerPeerId,
+        provenance: { kind: "extraction" },
+        fromId: asUlid(top.memoryId),
+        toId: ext.memory.id,
+        type: "duplicate-of",
+      };
+      await deps.repo.putRelationship(rel);
+      return { memoryId: top.memoryId, duplicateOf };
+    }
+  } catch {
+    // Dedup is best-effort; if @qvac/rag throws (e.g. empty workspace),
+    // fall through and ingest as new.
+  }
+
+  // 4. Persist all entities
   await deps.repo.putMemory(ext.memory);
   for (const p of ext.people) await deps.repo.putPerson(p);
   for (const pl of ext.places) await deps.repo.putPlace(pl);
@@ -53,7 +95,7 @@ export async function captureText(
   for (const t of ext.tasks) await deps.repo.putTask(t);
   for (const r of ext.externalRefs) await deps.repo.putExternalRef(r);
 
-  // 4. Secondary indexes (tags from extraction + user-provided tags merged)
+  // 5. Secondary indexes (tags from extraction + user-provided tags merged)
   const allTags = [...ext.memory.tags, ...input.tags];
   await deps.indexes.indexTags(ext.memory.id, allTags);
   await deps.indexes.indexPersons(
@@ -61,7 +103,7 @@ export async function captureText(
     ext.people.map((p) => p.id)
   );
 
-  // 5. Ingest into @qvac/rag workspace (computes + stores the embedding)
+  // 6. Ingest into @qvac/rag workspace (computes + stores the embedding)
   await deps.workspace.ingest({
     memoryId: asUlid(ext.memory.id),
     body: ext.memory.body,
@@ -71,12 +113,6 @@ export async function captureText(
       createdAt: ext.memory.createdAt,
     },
   });
-
-  // Note: cosine-≥0.92 dedup against existing memories (spec §9.3 step 6)
-  // is deferred. Doing it correctly requires querying ragSearch with a
-  // 1-K threshold lookup before ingest; the dedup module ships in @vault/ai
-  // but the orchestration lives in Plan 2 (where it's clearer how
-  // duplicates across peers should be handled).
 
   return { memoryId: ext.memory.id };
 }
@@ -92,9 +128,13 @@ export async function captureAudio(
 ): Promise<CaptureResult> {
   const transcript = await transcribeAudio(deps.pool, input.audio);
   const text = transcript.segments.map((s) => s.text).join(" ");
-  // Persist the audio SourceRecord (the bytes themselves stay on disk
-  // outside Autobee; only the ref + transcript metadata are stored).
+  // Persist the audio bytes under VAULT_ROOT/audio/<id>.bin and record a
+  // ref pointing at the on-disk path. The bytes themselves never go into
+  // Autobee (spec §7.2: file bodies do not sync).
   const nowIso = new Date().toISOString();
+  const audioId = newUlid();
+  const audioRel = `audio/${audioId}.bin`;
+  await deps.fs.writeFile(audioRel, input.audio);
   const src: SourceRecord = {
     id: newUlid(),
     createdAt: nowIso,
@@ -102,20 +142,11 @@ export async function captureAudio(
     ownerPeerId: deps.ownerPeerId,
     provenance: { kind: "audio-import" },
     kind: "audio",
-    audioRef: `vault://audio/${newUlid()}`,
+    audioRef: `vault://${audioRel}`,
     transcript,
   };
   await deps.repo.putSourceRecord(src);
 
   // Reuse the text capture pipeline from this point
-  return captureText(
-    {
-      pool: deps.pool,
-      repo: deps.repo,
-      indexes: deps.indexes,
-      workspace: deps.workspace,
-      ownerPeerId: deps.ownerPeerId,
-    },
-    { text, tags: input.tags }
-  );
+  return captureText(deps, { text, tags: input.tags });
 }

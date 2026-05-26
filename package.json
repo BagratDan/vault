@@ -13,7 +13,7 @@
     "test:unit": "pnpm -r --parallel test:unit",
     "test:int": "pnpm -r --parallel test:int",
     "e2e": "pnpm --filter @vault/e2e test",
-    "lint": "eslint packages/ tools/",
+    "lint": "eslint packages/ tools/ e2e/",
     "typecheck": "pnpm -r --parallel typecheck",
     "dev": "pnpm --filter @vault/app dev",
     "start": "node packages/app/dist/index.js"

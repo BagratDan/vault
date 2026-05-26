@@ -2,6 +2,8 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { createSidecarServer, type SidecarServer } from "../src/http-server.js";
 import { WebSocket } from "ws";
 
+const TOKEN = "test-token-1234567890";
+
 describe("createSidecarServer", () => {
   let server: SidecarServer;
 
@@ -9,6 +11,7 @@ describe("createSidecarServer", () => {
     server = await createSidecarServer({
       port: 0,
       host: "127.0.0.1",
+      authToken: TOKEN,
       onMessage: async (msg) => ({ echoed: msg }),
     });
   });
@@ -22,6 +25,18 @@ describe("createSidecarServer", () => {
       createSidecarServer({
         port: 0,
         host: "0.0.0.0",
+        authToken: TOKEN,
+        onMessage: async () => ({}),
+      })
+    ).rejects.toThrow(/loopback/);
+  });
+
+  it("refuses to bind 'localhost' (DNS-dependent; numeric only)", async () => {
+    await expect(
+      createSidecarServer({
+        port: 0,
+        host: "localhost",
+        authToken: TOKEN,
         onMessage: async () => ({}),
       })
     ).rejects.toThrow(/loopback/);
@@ -34,8 +49,8 @@ describe("createSidecarServer", () => {
     expect(body).toEqual({ ok: true });
   });
 
-  it("WS echoes via the onMessage handler", async () => {
-    const ws = new WebSocket(`ws://127.0.0.1:${server.port}/ws`);
+  it("WS echoes via the onMessage handler when token is presented", async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${server.port}/ws?token=${TOKEN}`);
     await new Promise<void>((res) => ws.once("open", () => res()));
     ws.send(JSON.stringify({ hello: "world" }));
     const reply = await new Promise<string>((res) =>
@@ -44,5 +59,27 @@ describe("createSidecarServer", () => {
     const parsed = JSON.parse(reply);
     expect(parsed).toMatchObject({ echoed: { hello: "world" } });
     ws.close();
+  });
+
+  it("WS rejects connection without a token", async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${server.port}/ws`);
+    const result = await new Promise<"open" | "error" | "close">((res) => {
+      ws.once("open", () => res("open"));
+      ws.once("error", () => res("error"));
+      ws.once("unexpected-response", () => res("error"));
+    });
+    expect(result).toBe("error");
+  });
+
+  it("WS rejects a request whose Origin header is from another site", async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${server.port}/ws?token=${TOKEN}`, {
+      headers: { origin: "http://evil.example.com" },
+    });
+    const result = await new Promise<"open" | "error">((res) => {
+      ws.once("open", () => res("open"));
+      ws.once("error", () => res("error"));
+      ws.once("unexpected-response", () => res("error"));
+    });
+    expect(result).toBe("error");
   });
 });

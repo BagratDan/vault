@@ -30,6 +30,7 @@ const APP_DIR = path.join(REPO_ROOT, "packages/app");
 
 let child: ChildProcess;
 let port: number;
+let authToken: string;
 let vaultRoot: string;
 
 beforeAll(async () => {
@@ -75,6 +76,11 @@ beforeAll(async () => {
       reject(new Error(`sidecar exited early with code ${code}`));
     });
   });
+
+  // Sidecar writes the per-launch auth token under VAULT_ROOT/.ws-token.
+  authToken = (
+    await fs.readFile(path.join(vaultRoot, ".ws-token"), "utf-8")
+  ).trim();
 }, 30_000);
 
 afterAll(async () => {
@@ -95,7 +101,7 @@ async function openWs(): Promise<{
   ws: WebSocket;
   messages: CapturedMessage[];
 }> {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${authToken}`);
   await new Promise<void>((resolve) => ws.once("open", () => resolve()));
   const messages: CapturedMessage[] = [];
   ws.on("message", (raw) => {

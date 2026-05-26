@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import path from "node:path";
 import { createSidecarServer } from "@vault/net";
 import { Provider, ModelPool } from "@vault/ai";
@@ -11,6 +12,7 @@ import { makeRouter } from "./ws-bridge.js";
 export interface VaultHandle {
   port: number;
   peerId: string;
+  authToken: string;
   close: () => Promise<void>;
 }
 
@@ -18,8 +20,18 @@ export async function startVault(): Promise<VaultHandle> {
   const cfg = loadConfig({ env: process.env });
   const fsApi = new VaultFs(cfg.vaultRoot);
   await fsApi.ensureDir("data");
+  await fsApi.ensureDir("audio");
 
   const identity = await loadOrCreateIdentity(fsApi);
+
+  // Per-launch WS auth token. Written under VAULT_ROOT with mode 0600
+  // for local debugging; the web UI fetches it via the sidecar's
+  // origin-gated GET /token endpoint.
+  const authToken = crypto.randomBytes(32).toString("hex");
+  await fsApi.writeFile(
+    ".ws-token",
+    new TextEncoder().encode(authToken)
+  );
 
   const opened = await openStore(path.join(cfg.vaultRoot, "data"));
   const repo = new Repo(opened.bee);
@@ -40,18 +52,21 @@ export async function startVault(): Promise<VaultHandle> {
     repo,
     indexes,
     workspace,
+    fs: fsApi,
     ownerPeerId: identity.peerId,
   });
 
   const server = await createSidecarServer({
     port: cfg.wsPort,
     host: cfg.wsHost,
+    authToken,
     onMessage: async (msg, conn) => router(msg, conn),
   });
 
   return {
     port: server.port,
     peerId: identity.peerId,
+    authToken,
     close: async () => {
       await server.close();
       await pool.unloadAll();

@@ -12,6 +12,7 @@ export default defineConfig({
         ws: true,
       },
       "/healthz": "http://127.0.0.1:7421",
+      "/token": "http://127.0.0.1:7421",
     },
   },
 });

@@ -15,9 +15,13 @@ export default [
       "**/.data/**",
     ],
   },
-  // Global rules for all TypeScript files under packages/ and tools/
+  // Global rules for all TypeScript files under packages/, tools/, e2e/
   {
-    files: ["packages/**/*.ts", "packages/**/*.tsx", "tools/**/*.ts", "tools/**/*.tsx"],
+    files: [
+      "packages/**/*.{ts,tsx}",
+      "tools/**/*.{ts,tsx}",
+      "e2e/**/*.{ts,tsx}",
+    ],
     languageOptions: {
       parser: tsParser,
       parserOptions: { ecmaVersion: 2022, sourceType: "module" },
@@ -38,9 +42,14 @@ export default [
       ],
     },
   },
-  // Network import guard for packages/** only
+  // Network import guard — applies to TS/TSX/JS/MJS/CJS across packages/ and e2e/
+  // (e2e/ runs in Node and could regress the trust posture if it pulled in
+  // unauthorized network deps).
   {
-    files: ["packages/**/*.ts", "packages/**/*.tsx"],
+    files: [
+      "packages/**/*.{ts,tsx,js,mjs,cjs}",
+      "e2e/**/*.{ts,tsx,js,mjs,cjs}",
+    ],
     plugins: {
       "vault-internal": {
         rules: { "no-network-imports-outside-net": noNetworkImports },

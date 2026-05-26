@@ -41,12 +41,20 @@ export function makeRouter(deps: BridgeDeps) {
     switch (msg.kind) {
       case "capture.text": {
         const r = await captureText(deps, { text: msg.text, tags: msg.tags });
-        return { kind: "capture.ack", memoryId: r.memoryId };
+        return {
+          kind: "capture.ack",
+          memoryId: r.memoryId,
+          ...(r.duplicateOf ? { duplicateOf: r.duplicateOf } : {}),
+        };
       }
       case "capture.audio": {
         const audio = Uint8Array.from(Buffer.from(msg.audioBase64, "base64"));
         const r = await captureAudio(deps, { audio, tags: msg.tags });
-        return { kind: "capture.ack", memoryId: r.memoryId };
+        return {
+          kind: "capture.ack",
+          memoryId: r.memoryId,
+          ...(r.duplicateOf ? { duplicateOf: r.duplicateOf } : {}),
+        };
       }
       case "search.run": {
         const filters = msg.filters
@@ -63,8 +71,13 @@ export function makeRouter(deps: BridgeDeps) {
           ...(filters ? { filters } : {}),
         });
         // Kick off answer generation in the background; stream chunks via conn.
+        // Defer one microtask so the search.hits reply flushes first; otherwise
+        // the empty-hits branch of streamAnswer could write answer.chunk over
+        // the same socket BEFORE search.hits goes out.
         const requestId = newUlid();
-        void streamAnswer(deps, conn, requestId, msg.query, hits);
+        queueMicrotask(() => {
+          void streamAnswer(deps, conn, requestId, msg.query, hits);
+        });
         return {
           kind: "search.hits",
           hits: hits.map((h) => ({

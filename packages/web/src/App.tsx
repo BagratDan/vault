@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { createWsClient } from "./ws-client.js";
+import React, { useEffect, useRef, useState } from "react";
+import { createWsClient, type WsClient } from "./ws-client.js";
 import { CapturePane } from "./components/CapturePane.js";
 import { SearchBar } from "./components/SearchBar.js";
 import { ResultCard } from "./components/ResultCard.js";
@@ -9,20 +9,62 @@ import { ModelStatus } from "./components/ModelStatus.js";
 import type { Hit, Citation, ClientMessage } from "./types.js";
 
 export function App() {
-  const ws = useMemo(() => {
-    if (typeof window === "undefined") return null;
-    return createWsClient({ url: `ws://${window.location.host}/ws` });
-  }, []);
+  const [ws, setWs] = useState<WsClient | null>(null);
+  const [connState, setConnState] = useState<"idle" | "loading" | "ready" | "error">(
+    "idle"
+  );
   const [hits, setHits] = useState<Hit[]>([]);
   const [answer, setAnswer] = useState<{ text: string; citations: Citation[] } | null>(
     null
   );
   const [filters, setFilters] = useState<Filters>({});
   const [playing, setPlaying] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioQueue = useRef<{ queue: string[]; el: HTMLAudioElement | null }>({
+    queue: [],
+    el: null,
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let cancelled = false;
+    setConnState("loading");
+    (async () => {
+      try {
+        const res = await fetch("/token", { credentials: "omit" });
+        if (!res.ok) throw new Error(`token endpoint returned ${res.status}`);
+        const body = (await res.json()) as { token: string };
+        if (cancelled) return;
+        const client = createWsClient({
+          url: `ws://${window.location.host}/ws?token=${encodeURIComponent(body.token)}`,
+        });
+        setWs(client);
+        setConnState("ready");
+      } catch {
+        if (!cancelled) setConnState("error");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!ws) return;
+    if (!audioQueue.current.el) {
+      const el = new Audio();
+      // Play the next queued blob URL when the current one finishes,
+      // revoking the URL we just played to avoid blob leaks.
+      el.addEventListener("ended", () => {
+        const finishedUrl = el.src;
+        if (finishedUrl.startsWith("blob:")) URL.revokeObjectURL(finishedUrl);
+        const next = audioQueue.current.queue.shift();
+        if (next) {
+          el.src = next;
+          void el.play();
+        }
+      });
+      audioQueue.current.el = el;
+    }
     return ws.onMessage((m) => {
       if (m.kind === "search.hits") {
         setHits(m.hits);
@@ -34,9 +76,13 @@ export function App() {
         const bytes = Uint8Array.from(atob(m.audioBase64), (c) => c.charCodeAt(0));
         const blob = new Blob([bytes], { type: "audio/wav" });
         const url = URL.createObjectURL(blob);
-        if (!audioRef.current) audioRef.current = new Audio();
-        audioRef.current.src = url;
-        void audioRef.current.play();
+        const el = audioQueue.current.el!;
+        if (el.paused && !el.src.startsWith("blob:")) {
+          el.src = url;
+          void el.play();
+        } else {
+          audioQueue.current.queue.push(url);
+        }
       } else if (m.kind === "tts.done") {
         setPlaying(false);
       }
@@ -49,7 +95,7 @@ export function App() {
     <main className="mx-auto max-w-3xl space-y-5 p-6">
       <header className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Vault</h1>
-        <ModelStatus state="ready" />
+        <ModelStatus state={connState} />
       </header>
 
       <CapturePane

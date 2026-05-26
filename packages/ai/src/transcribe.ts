@@ -30,14 +30,17 @@ export async function transcribeAudio(
     async () => {
       const result = await transcribe({ audio });
       const segments: TranscriptSegment[] = result.segments.map((s) => {
-        const text =
+        // Keep the words; prefix a marker so downstream extraction and the
+        // UI can flag uncertainty without losing the actual transcription
+        // (spec §9.3 step 2: segments are "kept but marked").
+        const marker =
           s.confidence <= 0
-            ? "[INAUDIBLE]"
+            ? "[INAUDIBLE] "
             : s.confidence < threshold
-              ? "[low-confidence]"
-              : s.text;
+              ? "[low-confidence] "
+              : "";
         return {
-          text,
+          text: marker + s.text,
           startMs: s.startMs,
           endMs: s.endMs,
           confidence: s.confidence,

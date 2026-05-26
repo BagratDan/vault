@@ -36,17 +36,19 @@ describe("transcribeAudio", () => {
     expect(t.durationMs).toBe(1200);
     expect(t.segments).toHaveLength(2);
     expect(t.segments[0]!.text).toBe("Hello team");
-    expect(t.segments[1]!.text).toBe("[low-confidence]");
+    // Low-confidence segments are kept and PREFIXED so downstream consumers
+    // can flag uncertainty without losing the words.
+    expect(t.segments[1]!.text).toBe("[low-confidence] mumble");
     expect(t.segments[1]!.confidence).toBe(0.2);
   });
 
-  it("emits [INAUDIBLE] when a segment has confidence 0", async () => {
+  it("emits [INAUDIBLE] prefix when a segment has confidence 0", async () => {
     const { transcribe } = await import("@qvac/sdk");
     (transcribe as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       segments: [{ text: "", startMs: 0, endMs: 500, confidence: 0 }],
       durationMs: 500,
     });
     const t = await transcribeAudio(pool, new Uint8Array([0]));
-    expect(t.segments[0]!.text).toBe("[INAUDIBLE]");
+    expect(t.segments[0]!.text).toBe("[INAUDIBLE] ");
   });
 });

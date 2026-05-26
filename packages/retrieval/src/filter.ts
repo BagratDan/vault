@@ -28,11 +28,13 @@ export function matchesFilters(hit: RawHit, filters?: SearchFilters): boolean {
     if (!persons.includes(filters.personId)) return false;
   }
   const createdAt = hit.metadata["createdAt"];
-  if (filters.createdAfter && createdAt && createdAt < filters.createdAfter) {
-    return false;
-  }
-  if (filters.createdBefore && createdAt && createdAt > filters.createdBefore) {
-    return false;
+  if (filters.createdAfter || filters.createdBefore) {
+    // A date filter without a createdAt on the hit is treated as not matching.
+    // Otherwise undated memories would silently bypass time-bound queries
+    // ("show me everything before 2026-01-01" would return undated hits).
+    if (!createdAt) return false;
+    if (filters.createdAfter && createdAt < filters.createdAfter) return false;
+    if (filters.createdBefore && createdAt > filters.createdBefore) return false;
   }
   return true;
 }
