@@ -12,6 +12,7 @@ import { InviteTokenDisplay } from "./components/InviteTokenDisplay.js";
 import { ToastQueue } from "./components/ToastQueue.js";
 import type { IncomingRequest } from "./components/ConsentToast.js";
 import { AuditScreen, type AuditEvent } from "./components/AuditScreen.js";
+import { AdminPane, type AdminMember } from "./components/AdminPane.js";
 import { useHashRoute, navigate } from "./routes.js";
 import type { Hit, Citation, ClientMessage } from "./types.js";
 
@@ -42,6 +43,7 @@ export function App() {
   const [granted, setGranted] = useState<Map<string, { scope: string; text: string }>>(new Map());
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [auditFilter, setAuditFilter] = useState<{ peerId?: string; kind?: string }>({});
+  const [adminMembers, setAdminMembers] = useState<AdminMember[]>([]);
   const route = useHashRoute();
   const toastsRef = useRef<IncomingRequest[]>([]);
   useEffect(() => {
@@ -183,6 +185,11 @@ export function App() {
         // Soft ack — no UI action needed.
       } else if (m.kind === "audit.events") {
         setAuditEvents(m.events as AuditEvent[]);
+      } else if (m.kind === "admin.member-list") {
+        setAdminMembers(m.members);
+      } else if (m.kind === "admin.revoke-ack") {
+        setBanner({ kind: "success", text: `Revoked ${m.targetPeerId.slice(0, 8)}…` });
+        ws.send({ kind: "admin.member-list" });
       } else if (m.kind === "answer.chunk") {
         setAnswer({ text: m.text, citations: [] });
       } else if (m.kind === "answer.done") {
@@ -212,6 +219,12 @@ export function App() {
       ws.send({ kind: "audit.query" });
     }
   }, [route, ws]);
+
+  useEffect(() => {
+    if (route === "admin" && ws && vaultStateView === "admin") {
+      ws.send({ kind: "admin.member-list" });
+    }
+  }, [route, ws, vaultStateView]);
 
   if (connState !== "ready") {
     return (
@@ -257,6 +270,43 @@ export function App() {
     );
   }
 
+  if (route === "admin") {
+    if (vaultStateView !== "admin") {
+      return (
+        <main className="mx-auto max-w-3xl p-6">
+          <p className="text-sm text-rose-300">Admin only.</p>
+          <button
+            type="button"
+            onClick={() => navigate("home")}
+            className="mt-2 text-xs text-slate-400 hover:text-slate-200"
+          >
+            ← back
+          </button>
+        </main>
+      );
+    }
+    return (
+      <AdminPane
+        members={adminMembers}
+        selfPeerId={selfPeerId}
+        onRevoke={(targetPeerId, reason) => {
+          const payload: { kind: "admin.revoke-member"; targetPeerId: string; reason?: string } = {
+            kind: "admin.revoke-member",
+            targetPeerId,
+          };
+          if (reason) payload.reason = reason;
+          send(payload);
+        }}
+        onViewAccess={(targetPeerId) => {
+          setAuditFilter({ peerId: targetPeerId });
+          send({ kind: "audit.query", peerId: targetPeerId });
+          navigate("audit");
+        }}
+        onClose={() => navigate("home")}
+      />
+    );
+  }
+
   return (
     <main className="mx-auto max-w-3xl space-y-5 p-6">
       <header className="flex items-center justify-between">
@@ -269,6 +319,15 @@ export function App() {
           >
             Audit
           </button>
+          {vaultStateView === "admin" && (
+            <button
+              type="button"
+              onClick={() => navigate("admin")}
+              className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-700"
+            >
+              Admin
+            </button>
+          )}
           <PeerList
             peers={peers}
             selfPeerId={selfPeerId}
