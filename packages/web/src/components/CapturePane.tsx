@@ -1,14 +1,33 @@
 import React, { useState } from "react";
 
 export interface CapturePaneProps {
-  onSubmitText: (text: string, tags: string[]) => void;
-  onSubmitAudio: (audio: Uint8Array, tags: string[]) => void;
+  onSubmitText: (
+    text: string,
+    tags: string[],
+    requestableScopes: Array<"metadata" | "snippet" | "file">
+  ) => void;
+  onSubmitAudio: (
+    audio: Uint8Array,
+    tags: string[],
+    requestableScopes: Array<"metadata" | "snippet" | "file">
+  ) => void;
 }
 
 export function CapturePane({ onSubmitText, onSubmitAudio }: CapturePaneProps) {
   const [text, setText] = useState("");
   const [recording, setRecording] = useState(false);
   const [recorder, setRecorder] = useState<MediaRecorder | null>(null);
+  const [scopes, setScopes] = useState<Array<"metadata" | "snippet" | "file">>([
+    "metadata",
+    "snippet",
+    "file",
+  ]);
+
+  function toggleScope(s: "metadata" | "snippet" | "file") {
+    setScopes((prev) =>
+      prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]
+    );
+  }
 
   function startRecording() {
     navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
@@ -18,7 +37,7 @@ export function CapturePane({ onSubmitText, onSubmitAudio }: CapturePaneProps) {
       r.onstop = async () => {
         const blob = new Blob(chunks, { type: "audio/webm" });
         const buf = new Uint8Array(await blob.arrayBuffer());
-        onSubmitAudio(buf, []);
+        onSubmitAudio(buf, [], scopes);
         stream.getTracks().forEach((t) => t.stop());
       };
       r.start();
@@ -42,7 +61,7 @@ export function CapturePane({ onSubmitText, onSubmitAudio }: CapturePaneProps) {
         onSubmit={(e) => {
           e.preventDefault();
           if (!text.trim()) return;
-          onSubmitText(text.trim(), []);
+          onSubmitText(text.trim(), [], scopes);
           setText("");
         }}
       >
@@ -53,6 +72,20 @@ export function CapturePane({ onSubmitText, onSubmitAudio }: CapturePaneProps) {
           onChange={(e) => setText(e.target.value)}
           className="w-full resize-none rounded-xl bg-slate-800 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
         />
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-300">
+          <span className="text-slate-500">Allow requests:</span>
+          {(["metadata", "snippet", "file"] as const).map((s) => (
+            <label key={s} className="flex items-center gap-1">
+              <input
+                type="checkbox"
+                checked={scopes.includes(s)}
+                onChange={() => toggleScope(s)}
+                className="accent-cyan-500"
+              />
+              {s}
+            </label>
+          ))}
+        </div>
         <div className="mt-3 flex gap-2">
           <button
             type="submit"
@@ -69,7 +102,7 @@ export function CapturePane({ onSubmitText, onSubmitAudio }: CapturePaneProps) {
           >
             {recording ? "Stop" : "Record"}
           </button>
-          <FileImport onAudio={(buf) => onSubmitAudio(buf, [])} />
+          <FileImport onAudio={(buf) => onSubmitAudio(buf, [], scopes)} />
         </div>
       </form>
     </section>

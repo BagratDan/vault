@@ -46,6 +46,7 @@ export function App() {
   const [adminMembers, setAdminMembers] = useState<AdminMember[]>([]);
   const route = useHashRoute();
   const toastsRef = useRef<IncomingRequest[]>([]);
+  const pendingScopes = useRef<Array<"metadata" | "snippet" | "file">>([]);
   useEffect(() => {
     toastsRef.current = toasts;
   }, [toasts]);
@@ -126,6 +127,14 @@ export function App() {
             ? { kind: "info", text: `Duplicate of memory ${m.duplicateOf.slice(0, 8)}` }
             : { kind: "success", text: `Saved memory ${m.memoryId.slice(0, 8)}` }
         );
+        if (!m.duplicateOf && pendingScopes.current.length > 0) {
+          ws.send({
+            kind: "memory.update-scopes",
+            memoryId: m.memoryId,
+            requestableScopes: pendingScopes.current,
+          });
+          pendingScopes.current = [];
+        }
       } else if (m.kind === "error") {
         const short = m.message.length > 240 ? m.message.slice(0, 240) + "…" : m.message;
         setBanner({ kind: "error", text: `${m.code}: ${short}` });
@@ -348,12 +357,16 @@ export function App() {
       {banner && <Banner banner={banner} onDismiss={() => setBanner(null)} />}
 
       <CapturePane
-        onSubmitText={(text, tags) => send({ kind: "capture.text", text, tags })}
-        onSubmitAudio={(audio, tags) => {
+        onSubmitText={(text, tags, scopes) => {
+          send({ kind: "capture.text", text, tags });
+          pendingScopes.current = scopes;
+        }}
+        onSubmitAudio={(audio, tags, scopes) => {
           let bin = "";
           for (let i = 0; i < audio.length; i++) bin += String.fromCharCode(audio[i]!);
           const audioBase64 = btoa(bin);
           send({ kind: "capture.audio", audioBase64, tags });
+          pendingScopes.current = scopes;
         }}
       />
 
