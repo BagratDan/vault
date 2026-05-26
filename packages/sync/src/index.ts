@@ -9,3 +9,4 @@ export * from "./swarm-transport.js";
 export * from "./audit.js";
 export * from "./consent-protocol.js";
 export * from "./rate-limit.js";
+export * from "./folder-local.js";
