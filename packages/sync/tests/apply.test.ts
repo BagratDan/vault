@@ -231,4 +231,105 @@ describe("apply()", () => {
     );
     expect(data[`revocation/${revocation.id}`]).toBeUndefined();
   });
+
+  describe("apply — folder kind", () => {
+    it("accepts a self-signed folder from an admitted peer", async () => {
+      const { data, view, base } = makeStore();
+      const apply = makeApply(deps);
+      // 1. Founder bootstrap Member (admits founder into roster)
+      const founderMember = {
+        id: "01J0ABC0000000000000000001",
+        kind: "member" as const,
+        peerId: founderPeerId,
+        displayName: "Sarah",
+        role: "admin" as const,
+        admittedBy: founderPeerId,
+        admittedAt: "2026-05-26T10:00:00.000Z",
+        publicKey: founderPeerId,
+      };
+      await apply(
+        [node({ kind: "member", key: `member/${founderPeerId}`,
+          value: { ...founderMember, sig: signCanonical(founderMember, founder.secretKey) } })],
+        view as never, base as never
+      );
+      // 2. Folder, self-signed by founder
+      const folderBody = {
+        id: "01J0FOLDER0000000000000001",
+        createdAt: "2026-05-26T10:00:00.000Z",
+        updatedAt: "2026-05-26T10:00:00.000Z",
+        ownerPeerId: founderPeerId,
+        provenance: { kind: "user" as const },
+        kind: "folder" as const,
+        displayName: "Acme",
+        visibility: "public" as const,
+      };
+      await apply(
+        [node({ kind: "folder", key: `folder/${folderBody.id}`,
+          value: { ...folderBody, sig: signCanonical(folderBody, founder.secretKey) } })],
+        view as never, base as never
+      );
+      expect(data[`folder/${folderBody.id}`]).toBeDefined();
+    });
+
+    it("rejects a folder from a peer not in the roster", async () => {
+      const { data, view, base } = makeStore();
+      const apply = makeApply(deps);
+      const folderBody = {
+        id: "01J0FOLDER0000000000000002",
+        createdAt: "2026-05-26T10:00:00.000Z",
+        updatedAt: "2026-05-26T10:00:00.000Z",
+        ownerPeerId: strangerPeerId,
+        provenance: { kind: "user" as const },
+        kind: "folder" as const,
+        displayName: "Sneaky",
+        visibility: "public" as const,
+      };
+      await apply(
+        [node({ kind: "folder", key: `folder/${folderBody.id}`,
+          value: { ...folderBody, sig: signCanonical(folderBody, stranger.secretKey) } },
+          strangerPeerId)],
+        view as never, base as never
+      );
+      expect(data[`folder/${folderBody.id}`]).toBeUndefined();
+    });
+
+    it("rejects a folder with a bad signature", async () => {
+      const { data, view, base } = makeStore();
+      const apply = makeApply(deps);
+      // Founder bootstrap
+      const founderMember = {
+        id: "01J0ABC0000000000000000003",
+        kind: "member" as const,
+        peerId: founderPeerId,
+        displayName: "Sarah",
+        role: "admin" as const,
+        admittedBy: founderPeerId,
+        admittedAt: "2026-05-26T10:00:00.000Z",
+        publicKey: founderPeerId,
+      };
+      await apply(
+        [node({ kind: "member", key: `member/${founderPeerId}`,
+          value: { ...founderMember, sig: signCanonical(founderMember, founder.secretKey) } })],
+        view as never, base as never
+      );
+      const folderBody = {
+        id: "01J0FOLDER0000000000000003",
+        createdAt: "2026-05-26T10:00:00.000Z",
+        updatedAt: "2026-05-26T10:00:00.000Z",
+        ownerPeerId: founderPeerId,
+        provenance: { kind: "user" as const },
+        kind: "folder" as const,
+        displayName: "Tampered",
+        visibility: "public" as const,
+      };
+      // sign a DIFFERENT body than what we store → signature won't match
+      const badSig = signCanonical({ ...folderBody, displayName: "Other" }, founder.secretKey);
+      await apply(
+        [node({ kind: "folder", key: `folder/${folderBody.id}`,
+          value: { ...folderBody, sig: badSig } })],
+        view as never, base as never
+      );
+      expect(data[`folder/${folderBody.id}`]).toBeUndefined();
+    });
+  });
 });

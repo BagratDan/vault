@@ -16,6 +16,7 @@ export interface Op {
   kind:
     | "member"
     | "revocation"
+    | "folder"
     | "memory"
     | "person"
     | "place"
@@ -115,6 +116,17 @@ export function makeApply(deps: ApplyDeps) {
         const sig = dataOp.value["sig"] as string | undefined;
         if (typeof sig !== "string") continue;
         const ok = verifyCanonical(stripSig(dataOp.value), sig, signerPublicKey);
+        if (!ok) continue;
+      }
+
+      if (dataOp.kind === "folder") {
+        // Folder records are self-signed by the owner using their own autobee
+        // writer key — which is the same key that appended this op. Verify the
+        // signature against node.from.key (the writer's public key). The roster
+        // gate above already ensures the writer is an admitted peer.
+        const sig = dataOp.value["sig"] as string | undefined;
+        if (typeof sig !== "string") continue;
+        const ok = verifyCanonical(stripSig(dataOp.value), sig, node.from.key);
         if (!ok) continue;
       }
 
