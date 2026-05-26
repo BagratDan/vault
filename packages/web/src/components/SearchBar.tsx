@@ -19,6 +19,7 @@ export function SearchBar({ onSubmit }: SearchBarProps) {
       <input
         type="text"
         placeholder="Ask anything…"
+        aria-label="Search query"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         className="flex-1 rounded-xl bg-slate-800 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"

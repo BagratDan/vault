@@ -319,13 +319,16 @@ export function App() {
 
   return (
     <main className="mx-auto max-w-3xl space-y-5 p-6">
-      <header className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Vault</h1>
-        <div className="flex items-center gap-3">
+      <header className="flex flex-wrap items-center justify-between gap-y-2">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Vault</h1>
+          <p className="text-xs text-slate-400">Local-first, consent-gated memory</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <button
             type="button"
             onClick={() => navigate("audit")}
-            className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-700"
+            className="whitespace-nowrap rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-700"
           >
             Audit
           </button>
@@ -333,7 +336,7 @@ export function App() {
             <button
               type="button"
               onClick={() => navigate("admin")}
-              className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-700"
+              className="whitespace-nowrap rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-700"
             >
               Admin
             </button>
@@ -371,63 +374,81 @@ export function App() {
         }}
       />
 
-      <SearchBar
-        onSubmit={(query) => {
-          setAnswer(null);
-          const msg: ClientMessage =
-            Object.keys(filters).length > 0
-              ? { kind: "search.run", query, k: 8, filters }
-              : { kind: "search.run", query, k: 8 };
-          send(msg);
-        }}
-      />
-      <FilterControls value={filters} onChange={setFilters} />
-
-      {answer && (
-        <AnswerCard
-          text={answer.text}
-          citations={answer.citations}
-          playing={playing}
-          onPlay={(text) => {
-            setPlaying(true);
-            send({
-              kind: "tts.play",
-              text,
-              requestId: `tts-${Date.now()}`,
-            });
+      <section className="rounded-2xl bg-slate-900 p-5 shadow">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-400">
+          Ask
+        </h2>
+        <SearchBar
+          onSubmit={(query) => {
+            setAnswer(null);
+            const msg: ClientMessage =
+              Object.keys(filters).length > 0
+                ? { kind: "search.run", query, k: 8, filters }
+                : { kind: "search.run", query, k: 8 };
+            send(msg);
           }}
         />
-      )}
+        <div className="mt-3">
+          <FilterControls value={filters} onChange={setFilters} />
+        </div>
 
-      <div className="space-y-3">
-        {hits.map((h) => {
-          const ownerName = peers.find((p) => p.peerId === h.ownerPeerId)?.displayName;
-          const grant = granted.get(h.memoryId);
-          return (
-            <ResultCard
-              key={h.memoryId}
-              memoryId={h.memoryId}
-              score={h.score}
-              snippet={grant ? grant.text : h.snippet}
-              tags={h.tags}
-              {...(h.ownerPeerId ? { ownerPeerId: h.ownerPeerId } : {})}
-              {...(ownerName ? { ownerDisplayName: ownerName } : {})}
-              fullContentAvailable={!!grant}
-              onRequestAccess={
-                h.ownerPeerId && h.ownerPeerId !== selfPeerId
-                  ? (scope) =>
-                      send({
-                        kind: "consent.request",
-                        memoryId: h.memoryId,
-                        ownerPeerId: h.ownerPeerId!,
-                        scope,
-                      })
-                  : undefined
-              }
+        {answer && (
+          <div className="mt-4">
+            <AnswerCard
+              text={answer.text}
+              citations={answer.citations}
+              playing={playing}
+              onPlay={(text) => {
+                setPlaying(true);
+                send({
+                  kind: "tts.play",
+                  text,
+                  requestId: `tts-${Date.now()}`,
+                });
+              }}
             />
-          );
-        })}
-      </div>
+          </div>
+        )}
+
+        {hits.length > 0 && (
+          <div className="mt-4 space-y-3">
+            {hits.map((h) => {
+              const ownerName = peers.find((p) => p.peerId === h.ownerPeerId)?.displayName;
+              const grant = granted.get(h.memoryId);
+              return (
+                <ResultCard
+                  key={h.memoryId}
+                  memoryId={h.memoryId}
+                  score={h.score}
+                  snippet={grant ? grant.text : h.snippet}
+                  tags={h.tags}
+                  {...(h.ownerPeerId ? { ownerPeerId: h.ownerPeerId } : {})}
+                  {...(ownerName ? { ownerDisplayName: ownerName } : {})}
+                  fullContentAvailable={!!grant}
+                  onRequestAccess={
+                    h.ownerPeerId && h.ownerPeerId !== selfPeerId
+                      ? (scope) =>
+                          send({
+                            kind: "consent.request",
+                            memoryId: h.memoryId,
+                            ownerPeerId: h.ownerPeerId!,
+                            scope,
+                          })
+                      : undefined
+                  }
+                />
+              );
+            })}
+          </div>
+        )}
+
+        {!answer && hits.length === 0 && (
+          <p className="mt-4 text-xs text-slate-500">
+            Capture a memory above, then ask a question — your local LLM answers from your own
+            notes plus anything peers have shared with you.
+          </p>
+        )}
+      </section>
       <ToastQueue
         toasts={toasts}
         onRespond={(consentRequestId, decision) =>

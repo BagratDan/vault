@@ -107,4 +107,34 @@ describe("extractFromText", () => {
     expect(out.memory.body).toBe("The raw text we will store.");
     expect(completionCalls).toBe(2);
   });
+
+  // Regression: a single bad LLM event (non-ISO startsAt) used to throw
+  // at Repo.putEvent and abort the entire capture, losing the memory.
+  // We now drop invalid derived entities and keep the memory.
+  it("drops events with non-ISO startsAt instead of throwing", async () => {
+    completionResponses = [
+      JSON.stringify({
+        summary: "Sarah promised the migration by Friday",
+        body: "Sarah said she'd ship the migration by Friday.",
+        confidence: 0.92,
+        tags: ["commitment"],
+        people: [],
+        places: [],
+        events: [
+          { title: "Ship migration", startsAt: "by Friday" }, // bad
+          { title: "Demo", startsAt: "2026-05-30T17:00:00.000Z" }, // good
+        ],
+        tasks: [],
+        externalRefs: [],
+      }),
+    ];
+    const out = await extractFromText(pool, {
+      sourceRecordId: "01J0".padEnd(26, "A") as never,
+      text: "Sarah said she'd ship the migration by Friday.",
+      ownerPeerId: "a".repeat(64),
+    });
+    expect(out.memory.summary).toMatch(/Sarah/);
+    expect(out.events).toHaveLength(1);
+    expect(out.events[0]!.title).toBe("Demo");
+  });
 });

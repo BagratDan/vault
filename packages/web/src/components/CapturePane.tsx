@@ -73,7 +73,7 @@ export function CapturePane({ onSubmitText, onSubmitAudio }: CapturePaneProps) {
           className="w-full resize-none rounded-xl bg-slate-800 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
         />
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-300">
-          <span className="text-slate-500">Allow requests:</span>
+          <span className="text-slate-400">Allow requests:</span>
           {(["metadata", "snippet", "file"] as const).map((s) => (
             <label key={s} className="flex items-center gap-1">
               <input
