@@ -5,3 +5,4 @@ export * from "./sign.js";
 export * from "./roster.js";
 export * from "./apply.js";
 export * from "./swarm.js";
+export * from "./swarm-transport.js";

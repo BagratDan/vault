@@ -47,6 +47,26 @@ declare module "b4a" {
   ): number;
 }
 
+declare module "hyperswarm" {
+  interface ConnectionInfo {
+    publicKey: Uint8Array;
+  }
+  interface DuplexStream {
+    write(data: Uint8Array): boolean;
+    on(event: "data", cb: (data: Uint8Array) => void): this;
+    on(event: "close", cb: () => void): this;
+    on(event: "error", cb: (err: Error) => void): this;
+  }
+  class Hyperswarm {
+    constructor(opts?: Record<string, unknown>);
+    on(event: "connection", cb: (conn: DuplexStream, info: ConnectionInfo) => void): this;
+    join(topic: Uint8Array, opts?: { server?: boolean; client?: boolean }): unknown;
+    flush(): Promise<void>;
+    destroy(opts?: { force?: boolean }): Promise<void>;
+  }
+  export default Hyperswarm;
+}
+
 declare module "hypercore-crypto" {
   export interface KeyPair {
     publicKey: Uint8Array;
