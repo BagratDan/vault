@@ -13,7 +13,10 @@ import { ToastQueue } from "./components/ToastQueue.js";
 import type { IncomingRequest } from "./components/ConsentToast.js";
 import { AuditScreen, type AuditEvent } from "./components/AuditScreen.js";
 import { AdminPane, type AdminMember } from "./components/AdminPane.js";
-import { useHashRoute, navigate } from "./routes.js";
+import { useHashRoute, navigate, useFolderRoute, navigateFolder } from "./routes.js";
+import { FolderList, type FolderRow } from "./components/FolderList.js";
+import { AddFolderDialog } from "./components/AddFolderDialog.js";
+import { FolderView } from "./components/FolderView.js";
 import type { Hit, Citation, ClientMessage } from "./types.js";
 
 export function App() {
@@ -52,8 +55,23 @@ export function App() {
     createdAt: string;
     ownerPeerId: string;
     confidence: number;
+    folderId: string;
   }>>([]);
   const route = useHashRoute();
+  const folderRoute = useFolderRoute();
+  const [folders, setFolders] = useState<FolderRow[]>([]);
+  const [addOpen, setAddOpen] = useState(false);
+  const [folderProgress, setFolderProgress] = useState<
+    Record<
+      string,
+      {
+        current: number;
+        total: number;
+        phase: "scanning" | "extracting" | "embedding" | "done";
+        currentFile?: string;
+      }
+    >
+  >({});
   const toastsRef = useRef<IncomingRequest[]>([]);
   const pendingScopes = useRef<Array<"metadata" | "snippet" | "file">>([]);
   useEffect(() => {
@@ -114,6 +132,7 @@ export function App() {
         if (m.state === "admin" || m.state === "member") {
           ws.send({ kind: "peer.list" });
           ws.send({ kind: "memory.list" });
+          ws.send({ kind: "folder.list" });
         }
       } else if (m.kind === "vault.created" || m.kind === "vault.joined") {
         ws.send({ kind: "vault.status" });
@@ -131,6 +150,34 @@ export function App() {
         );
       } else if (m.kind === "peer.disconnected") {
         setPeers((prev) => prev.filter((p) => p.peerId !== m.peerId));
+      } else if (m.kind === "folder.list") {
+        setFolders(m.folders);
+      } else if (m.kind === "folder.added") {
+        ws.send({ kind: "folder.list" });
+        ws.send({ kind: "memory.list" });
+      } else if (m.kind === "folder.ingest-progress") {
+        setFolderProgress((p) => ({
+          ...p,
+          [m.folderId]: {
+            current: m.current,
+            total: m.total,
+            phase: m.phase,
+            ...(m.currentFile ? { currentFile: m.currentFile } : {}),
+          },
+        }));
+      } else if (m.kind === "folder.ingest-done") {
+        const done = m.ingested + m.skipped + m.errors;
+        setFolderProgress((p) => ({
+          ...p,
+          [m.folderId]: { current: done, total: done, phase: "done" },
+        }));
+        ws.send({ kind: "folder.list" });
+        ws.send({ kind: "memory.list" });
+      } else if (m.kind === "folder.updated") {
+        ws.send({ kind: "folder.list" });
+      } else if (m.kind === "folder.deleted") {
+        ws.send({ kind: "folder.list" });
+        ws.send({ kind: "memory.list" });
       } else if (m.kind === "invite.token") {
         setInviteToken({ token: m.token, expiresAt: m.expiresAt });
       } else if (m.kind === "search.hits") {
@@ -276,6 +323,140 @@ export function App() {
     );
   }
 
+  if (folderRoute) {
+    const f = folders.find((x) => x.folderId === folderRoute);
+    if (!f) {
+      return (
+        <main className="mx-auto max-w-3xl p-6">
+          <p className="text-sm text-slate-400">Loading folder…</p>
+          <button
+            type="button"
+            onClick={() => navigate("home")}
+            className="mt-2 text-xs text-slate-400 hover:text-slate-200"
+          >
+            ← folders
+          </button>
+        </main>
+      );
+    }
+    const folderFiles = library
+      .filter((m) => m.folderId === folderRoute)
+      .map((m) => ({
+        memoryId: m.memoryId,
+        summary: m.summary,
+        createdAt: m.createdAt,
+        tags: m.tags,
+      }));
+    const isOwner = f.ownerPeerId === selfPeerId;
+    return (
+      <FolderView
+        folder={{
+          folderId: f.folderId,
+          displayName: f.displayName,
+          visibility: f.visibility,
+          ownerPeerId: f.ownerPeerId,
+          fileCount: f.fileCount,
+          ...("path" in f && (f as { path?: string }).path
+            ? { path: (f as { path?: string }).path }
+            : {}),
+        }}
+        isOwner={isOwner}
+        files={folderFiles}
+        ingestProgress={folderProgress[folderRoute] ?? null}
+        onBack={() => navigate("home")}
+        onRescan={() => send({ kind: "folder.rescan", folderId: folderRoute })}
+        onToggleVisibility={(next) =>
+          send({ kind: "folder.update", folderId: folderRoute, visibility: next })
+        }
+        onDelete={() => {
+          if (
+            window.confirm(
+              "Delete this folder from the vault? The files on your disk are NOT touched."
+            )
+          ) {
+            send({ kind: "folder.delete", folderId: folderRoute });
+            navigate("home");
+          }
+        }}
+      >
+        <CapturePane
+          onSubmitText={(text, tags, scopes) => {
+            send({ kind: "capture.text", text, tags });
+            pendingScopes.current = scopes;
+          }}
+          onSubmitAudio={(audio, tags, scopes) => {
+            let bin = "";
+            for (let i = 0; i < audio.length; i++) bin += String.fromCharCode(audio[i]!);
+            const audioBase64 = btoa(bin);
+            send({ kind: "capture.audio", audioBase64, tags });
+            pendingScopes.current = scopes;
+          }}
+        />
+        <section className="rounded-2xl bg-slate-900 p-5 shadow">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-400">
+            Ask (this folder)
+          </h2>
+          <SearchBar
+            onSubmit={(query) => {
+              setAnswer(null);
+              send({ kind: "search.run", query, k: 8, folderIds: [folderRoute] });
+            }}
+          />
+          {answer && (
+            <div className="mt-4">
+              <AnswerCard
+                text={answer.text}
+                citations={answer.citations}
+                playing={playing}
+                onPlay={(text) => {
+                  setPlaying(true);
+                  send({ kind: "tts.play", text, requestId: `tts-${Date.now()}` });
+                }}
+              />
+            </div>
+          )}
+          {hits.length > 0 && (
+            <div className="mt-4 space-y-3">
+              {hits.map((h) => {
+                const ownerName = peers.find((p) => p.peerId === h.ownerPeerId)?.displayName;
+                const grant = granted.get(h.memoryId);
+                return (
+                  <ResultCard
+                    key={h.memoryId}
+                    memoryId={h.memoryId}
+                    score={h.score}
+                    snippet={grant ? grant.text : h.snippet}
+                    tags={h.tags}
+                    {...(h.ownerPeerId ? { ownerPeerId: h.ownerPeerId } : {})}
+                    {...(ownerName ? { ownerDisplayName: ownerName } : {})}
+                    fullContentAvailable={!!grant}
+                    {...(h.ownerPeerId && h.ownerPeerId !== selfPeerId
+                      ? {
+                          onRequestAccess: (scope: "metadata" | "snippet" | "file") =>
+                            send({
+                              kind: "consent.request",
+                              memoryId: h.memoryId,
+                              ownerPeerId: h.ownerPeerId!,
+                              scope,
+                            }),
+                        }
+                      : {})}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </section>
+        <ToastQueue
+          toasts={toasts}
+          onRespond={(consentRequestId, decision) =>
+            send({ kind: "consent.respond", consentRequestId, decision })
+          }
+        />
+      </FolderView>
+    );
+  }
+
   if (route === "audit") {
     return (
       <AuditScreen
@@ -286,9 +467,7 @@ export function App() {
         filter={auditFilter}
         onFilterChange={(next) => {
           setAuditFilter(next);
-          const payload: { peerId?: string; kind?: string } = {};
-          if (next.peerId) payload.peerId = next.peerId;
-          send({ kind: "audit.query", ...payload });
+          send({ kind: "audit.query", ...(next.peerId ? { peerId: next.peerId } : {}) });
         }}
         onClose={() => navigate("home")}
       />
@@ -375,23 +554,26 @@ export function App() {
 
       {banner && <Banner banner={banner} onDismiss={() => setBanner(null)} />}
 
-      <CapturePane
-        onSubmitText={(text, tags, scopes) => {
-          send({ kind: "capture.text", text, tags });
-          pendingScopes.current = scopes;
-        }}
-        onSubmitAudio={(audio, tags, scopes) => {
-          let bin = "";
-          for (let i = 0; i < audio.length; i++) bin += String.fromCharCode(audio[i]!);
-          const audioBase64 = btoa(bin);
-          send({ kind: "capture.audio", audioBase64, tags });
-          pendingScopes.current = scopes;
-        }}
+      {addOpen && (
+        <AddFolderDialog
+          onCancel={() => setAddOpen(false)}
+          onSubmit={(path, displayName, visibility) => {
+            setAddOpen(false);
+            send({ kind: "folder.add", path, displayName, visibility });
+          }}
+        />
+      )}
+
+      <FolderList
+        folders={folders}
+        selfPeerId={selfPeerId}
+        onOpen={(folderId) => navigateFolder(folderId)}
+        onAddClick={() => setAddOpen(true)}
       />
 
       <section className="rounded-2xl bg-slate-900 p-5 shadow">
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-400">
-          Ask
+          Ask (across all folders)
         </h2>
         <SearchBar
           onSubmit={(query) => {
@@ -440,17 +622,17 @@ export function App() {
                   {...(h.ownerPeerId ? { ownerPeerId: h.ownerPeerId } : {})}
                   {...(ownerName ? { ownerDisplayName: ownerName } : {})}
                   fullContentAvailable={!!grant}
-                  onRequestAccess={
-                    h.ownerPeerId && h.ownerPeerId !== selfPeerId
-                      ? (scope) =>
+                  {...(h.ownerPeerId && h.ownerPeerId !== selfPeerId
+                    ? {
+                        onRequestAccess: (scope: "metadata" | "snippet" | "file") =>
                           send({
                             kind: "consent.request",
                             memoryId: h.memoryId,
                             ownerPeerId: h.ownerPeerId!,
                             scope,
-                          })
-                      : undefined
-                  }
+                          }),
+                      }
+                    : {})}
                 />
               );
             })}
@@ -459,62 +641,9 @@ export function App() {
 
         {!answer && hits.length === 0 && (
           <p className="mt-4 text-xs text-slate-500">
-            Capture a memory above, then ask a question — your local LLM answers from your own
-            notes plus anything peers have shared with you.
+            Open a folder to capture memories, then ask a question — your local LLM answers
+            from your own notes plus anything peers have shared with you.
           </p>
-        )}
-      </section>
-
-      <section className="rounded-2xl bg-slate-900 p-5 shadow">
-        <div className="mb-3 flex items-baseline justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">
-            Library
-          </h2>
-          <span className="text-xs text-slate-500">
-            {library.length} {library.length === 1 ? "memory" : "memories"}
-          </span>
-        </div>
-        {library.length === 0 ? (
-          <p className="text-xs text-slate-500">
-            Nothing captured yet. Use the Capture box above — text, recording, or audio file
-            import — and your memories will show up here.
-          </p>
-        ) : (
-          <ul className="space-y-2">
-            {library.map((m) => (
-              <li
-                key={m.memoryId}
-                className="rounded-xl bg-slate-800 p-3 ring-1 ring-slate-800/60"
-              >
-                <div className="mb-1 flex items-baseline justify-between gap-2">
-                  <span className="font-mono text-xs text-slate-500">
-                    {m.memoryId.slice(0, 8)}
-                  </span>
-                  <span className="font-mono text-xs text-slate-500">
-                    {new Date(m.createdAt).toLocaleString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                      hour: "numeric",
-                      minute: "2-digit",
-                    })}
-                  </span>
-                </div>
-                <p className="text-sm text-slate-100">{m.summary}</p>
-                {m.tags.length > 0 && (
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    {m.tags.map((t) => (
-                      <span
-                        key={t}
-                        className="rounded-full bg-slate-700 px-2 py-0.5 text-xs text-slate-300"
-                      >
-                        {t}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
         )}
       </section>
 

@@ -33,10 +33,11 @@ vi.mock("../src/ws-client.js", () => ({
 }));
 
 describe("App", () => {
-  it("renders the capture pane and search bar", async () => {
+  it("renders the folder list and search bar on home", async () => {
     render(<App />);
-    await waitFor(() => screen.getByPlaceholderText(/capture a memory/i));
-    expect(screen.getByPlaceholderText(/capture a memory/i)).toBeTruthy();
+    await waitFor(() => screen.getByText(/^folders$/i));
+    expect(screen.getByText(/^folders$/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /add folder/i })).toBeTruthy();
     expect(screen.getByPlaceholderText(/ask anything/i)).toBeTruthy();
   });
 

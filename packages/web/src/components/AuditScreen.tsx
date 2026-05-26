@@ -68,22 +68,24 @@ export function AuditScreen({
           type="text"
           placeholder="Filter by peerId…"
           value={filter.peerId ?? ""}
-          onChange={(e) =>
+          onChange={(e) => {
+            const { peerId: _drop, ...rest } = filter;
             onFilterChange({
-              ...filter,
-              peerId: e.target.value || undefined,
-            })
-          }
+              ...rest,
+              ...(e.target.value ? { peerId: e.target.value } : {}),
+            });
+          }}
           className="flex-1 rounded-xl bg-slate-800 px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-cyan-500"
         />
         <select
           value={filter.kind ?? ""}
-          onChange={(e) =>
+          onChange={(e) => {
+            const { kind: _drop, ...rest } = filter;
             onFilterChange({
-              ...filter,
-              kind: e.target.value || undefined,
-            })
-          }
+              ...rest,
+              ...(e.target.value ? { kind: e.target.value } : {}),
+            });
+          }}
           className="rounded-xl bg-slate-800 px-3 py-1.5 text-xs"
         >
           <option value="">All kinds</option>
