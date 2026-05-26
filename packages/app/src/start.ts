@@ -81,9 +81,28 @@ export async function startVault(): Promise<VaultHandle> {
       // requester can correlate ownerPeerId against the roster + their own
       // vault.status.selfPeerId.
       const stampedPeerId = runtime.state?.selfPeerId ?? identity.peerId;
+      const probe = params as {
+        v: 1;
+        requestId: string;
+        query: string;
+        k: number;
+        folderIds?: string[];
+      };
+      // PROBE-TIME PRIVACY GATE depends on folderLocal + repo to resolve folder
+      // visibility. If either isn't active yet, we cannot safely run the gate,
+      // so return no hits rather than risk leaking private memories.
+      if (!runtime.folderLocal || !runtime.store) {
+        return { v: 1, requestId: probe.requestId, hits: [] };
+      }
       return handleSearchProbe(
-        { pool, workspace, selfPeerId: stampedPeerId },
-        params as { v: 1; requestId: string; query: string; k: number }
+        {
+          pool,
+          workspace,
+          selfPeerId: stampedPeerId,
+          repo: getRepo(),
+          folderLocal: runtime.folderLocal,
+        },
+        probe
       );
     }
     throw new Error(`unknown rpc method: ${method}`);

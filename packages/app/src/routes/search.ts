@@ -6,7 +6,10 @@ import {
   type SearchFilters,
   type SearchHit,
 } from "@vault/retrieval";
-import type { SwarmTransport } from "@vault/sync";
+import type { SwarmTransport, Repo, FolderLocal } from "@vault/sync";
+
+/** A SearchHit carrying its resolved folder, so the UI can scope/attribute it. */
+type FolderHit = SearchHit & { folderId?: string };
 
 export interface SearchDeps {
   pool: ModelPool;
@@ -15,12 +18,24 @@ export interface SearchDeps {
   swarm?: SwarmTransport | null;
   /** Self peerId, stamped on local hits so the requester can attribute them. */
   selfPeerId?: string;
+  /**
+   * Autobee repo, used to resolve a memoryId → its folderId. Optional: when
+   * absent, folder resolution is skipped (legacy no-folder behavior).
+   */
+  repo?: Repo;
+  /**
+   * Owner-local store, used to resolve PRIVATE memories' folderId + a
+   * folder's visibility. Optional / nullable for the same legacy fallback.
+   */
+  folderLocal?: FolderLocal | null;
 }
 
 export interface SearchRouteInput {
   query: string;
   k: number;
   filters?: SearchFilters;
+  /** When set, restrict hits to memories whose folderId is in this set. */
+  folderIds?: string[];
 }
 
 interface SearchProbe {
@@ -28,12 +43,26 @@ interface SearchProbe {
   requestId: string;
   query: string;
   k: number;
+  /** When set, the requester restricts results to these folders. */
+  folderIds?: string[];
 }
 
 interface SearchProbeReply {
   v: 1;
   requestId: string;
-  hits: SearchHit[];
+  hits: FolderHit[];
+}
+
+/**
+ * Deps for the peer-side probe handler. Unlike SearchDeps these are REQUIRED:
+ * the probe handler MUST resolve folder visibility to enforce the privacy gate.
+ */
+export interface SearchProbeDeps {
+  pool: ModelPool;
+  workspace: Workspace;
+  selfPeerId: string;
+  repo: Repo;
+  folderLocal: FolderLocal;
 }
 
 const PROBE_TIMEOUT_MS = 3_000;
@@ -47,8 +76,20 @@ const PROBE_TIMEOUT_MS = 3_000;
 export async function runSearch(
   deps: SearchDeps,
   input: SearchRouteInput
-): Promise<SearchHit[]> {
-  const localHits = await searchLocal(deps, input);
+): Promise<FolderHit[]> {
+  const rawLocal = await searchLocal(deps, input);
+  // Resolve folderId on each LOCAL hit so the requester's own folder-scoped
+  // search works and so hits carry folderId for the UI. Note: we do NOT drop
+  // private folders here — the owner sees their own private memories. Only the
+  // probe handler (which serves REMOTE peers) drops private.
+  const allow = input.folderIds ? new Set(input.folderIds) : null;
+  const localHits: FolderHit[] = [];
+  for (const h of rawLocal) {
+    const folderId = await resolveFolderId(deps, h.memoryId);
+    if (allow && !(folderId && allow.has(folderId))) continue;
+    localHits.push(folderId ? { ...h, folderId } : { ...h });
+  }
+
   const peers = deps.swarm?.listConnectedPeers() ?? [];
   if (peers.length === 0) return applyFilters(localHits, input.filters);
 
@@ -60,6 +101,7 @@ export async function runSearch(
           requestId: newUlid(),
           query: input.query,
           k: input.k,
+          ...(input.folderIds ? { folderIds: input.folderIds } : {}),
         } satisfies SearchProbe),
         new Promise<never>((_, rej) =>
           setTimeout(
@@ -70,13 +112,13 @@ export async function runSearch(
       ])
     )
   );
-  const remoteHits: SearchHit[] = [];
+  const remoteHits: FolderHit[] = [];
   for (const r of remoteSettled) {
     if (r.status !== "fulfilled") continue;
     const reply = r.value as SearchProbeReply;
     if (Array.isArray(reply?.hits)) remoteHits.push(...reply.hits);
   }
-  const byId = new Map<string, SearchHit>();
+  const byId = new Map<string, FolderHit>();
   for (const h of [...localHits, ...remoteHits]) {
     const prev = byId.get(h.memoryId);
     if (!prev || h.score > prev.score) byId.set(h.memoryId, h);
@@ -94,9 +136,15 @@ export async function runSearch(
  *
  * Plan 3: snippets are blurred at the RPC boundary. Real content only
  * crosses the wire after a successful consent.request → consent.response.
+ *
+ * Plan 4 (Task 17) — PROBE-TIME PRIVACY GATE. A private memory's embedding
+ * lives in the SAME unified workspace as public ones, so search() WILL return
+ * it. The storage gate (Task 13) keeps private memories out of Autobee, but
+ * THIS peer's own workspace still contains them — so the probe handler, which
+ * serves REMOTE requesters, MUST drop any hit whose folder is private.
  */
 export async function handleSearchProbe(
-  deps: { pool: ModelPool; workspace: Workspace; selfPeerId: string },
+  deps: SearchProbeDeps,
   probe: SearchProbe
 ): Promise<SearchProbeReply> {
   const localHits = await searchLocal(
@@ -107,8 +155,42 @@ export async function handleSearchProbe(
     },
     { query: probe.query, k: probe.k }
   );
-  const blurred = localHits.map((h) => ({ ...h, snippet: blurPreview(h.snippet) }));
-  return { v: 1, requestId: probe.requestId, hits: blurred };
+  // handleSearchProbe only ever serves the LOCAL peer's own memories (it
+  // searches the local workspace), so folderLocal.listFolders is authoritative
+  // for visibility.
+  const folders = await deps.folderLocal.listFolders();
+  const visById = new Map(folders.map((f) => [f.id, f.visibility] as const));
+  const allow = probe.folderIds ? new Set(probe.folderIds) : null;
+  const out: FolderHit[] = [];
+  for (const h of localHits) {
+    const folderId = await resolveFolderId(deps, h.memoryId);
+    if (!folderId) continue; // no folder → drop (legacy/unknown)
+    if (visById.get(folderId) === "private") continue; // PRIVACY GATE
+    if (allow && !allow.has(folderId)) continue; // scope filter
+    out.push({ ...h, folderId, snippet: blurPreview(h.snippet) });
+  }
+  return { v: 1, requestId: probe.requestId, hits: out };
+}
+
+/**
+ * Resolve a memoryId → its folderId, or null if unknown. Public memories live
+ * in Autobee (repo.getMemory); private memories live ONLY in the owner-local
+ * store (folderLocal.getPrivateMemory). When neither dep is available, returns
+ * null (legacy no-folder behavior).
+ */
+async function resolveFolderId(
+  deps: { repo?: Repo; folderLocal?: FolderLocal | null },
+  memoryId: string
+): Promise<string | null> {
+  if (deps.repo) {
+    const pub = await deps.repo.getMemory(memoryId as never);
+    if (pub) return pub.folderId ?? null;
+  }
+  if (deps.folderLocal) {
+    const prv = await deps.folderLocal.getPrivateMemory(memoryId);
+    if (prv) return prv.folderId ?? null;
+  }
+  return null;
 }
 
 async function searchLocal(
@@ -130,10 +212,10 @@ async function searchLocal(
   );
 }
 
-function applyFilters(
-  hits: SearchHit[],
+function applyFilters<T extends SearchHit>(
+  hits: T[],
   filters?: SearchFilters
-): SearchHit[] {
+): T[] {
   if (!filters) return hits;
   // Filter implementation lives in @vault/retrieval/filter.ts; for the
   // fan-out path it runs at the requester after merging. The plain

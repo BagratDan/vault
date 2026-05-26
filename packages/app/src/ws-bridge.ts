@@ -259,13 +259,14 @@ async function routeMessage(
             workspace: deps.workspace,
             swarm: deps.runtime.swarm,
             selfPeerId: stampedPeerId,
+            repo: deps.getRepo(),
+            folderLocal: deps.getFolderLocal(),
           },
           {
             query: msg.query,
             k: msg.k,
             ...(filters ? { filters } : {}),
-            // Task 17 adds folderIds support to runSearch; the schema already
-            // carries msg.folderIds, but SearchRouteInput doesn't accept it yet.
+            ...(msg.folderIds ? { folderIds: msg.folderIds } : {}),
           }
         );
         const requestId = newUlid();
@@ -280,6 +281,7 @@ async function routeMessage(
             snippet: h.snippet,
             ...(h.ownerPeerId ? { ownerPeerId: h.ownerPeerId } : {}),
             tags: h.tags,
+            ...(h.folderId ? { folderId: h.folderId } : {}),
           })),
         };
       });

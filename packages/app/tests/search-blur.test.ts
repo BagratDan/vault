@@ -23,6 +23,9 @@ vi.mock("@vault/retrieval", async () => ({
 
 import { handleSearchProbe } from "../src/routes/search.js";
 
+const HIT_MEM = "01J0ABCDEFGHJKMNPQRSTV0001";
+const PUB_FOLDER = "01J0PUBFLD00000000000000AA";
+
 describe("handleSearchProbe", () => {
   it("blurs snippets and stamps ownerPeerId", async () => {
     const reply = await handleSearchProbe(
@@ -30,6 +33,18 @@ describe("handleSearchProbe", () => {
         pool: {} as never,
         workspace: { getName: () => "ws" } as never,
         selfPeerId: "a".repeat(64),
+        repo: {
+          getMemory: async (id: string) =>
+            id === HIT_MEM ? { id: HIT_MEM, folderId: PUB_FOLDER } : null,
+        } as never,
+        folderLocal: {
+          getPrivateMemory: async () => null,
+          listFolders: async () => [
+            { id: PUB_FOLDER, visibility: "public" },
+          ],
+          getFolder: async (id: string) =>
+            id === PUB_FOLDER ? { id: PUB_FOLDER, visibility: "public" } : null,
+        } as never,
       },
       {
         v: 1,
