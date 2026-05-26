@@ -11,6 +11,8 @@ import { PeerList, type Peer } from "./components/PeerList.js";
 import { InviteTokenDisplay } from "./components/InviteTokenDisplay.js";
 import { ToastQueue } from "./components/ToastQueue.js";
 import type { IncomingRequest } from "./components/ConsentToast.js";
+import { AuditScreen, type AuditEvent } from "./components/AuditScreen.js";
+import { useHashRoute, navigate } from "./routes.js";
 import type { Hit, Citation, ClientMessage } from "./types.js";
 
 export function App() {
@@ -38,6 +40,9 @@ export function App() {
   );
   const [toasts, setToasts] = useState<IncomingRequest[]>([]);
   const [granted, setGranted] = useState<Map<string, { scope: string; text: string }>>(new Map());
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
+  const [auditFilter, setAuditFilter] = useState<{ peerId?: string; kind?: string }>({});
+  const route = useHashRoute();
   const toastsRef = useRef<IncomingRequest[]>([]);
   useEffect(() => {
     toastsRef.current = toasts;
@@ -176,6 +181,8 @@ export function App() {
         }
       } else if (m.kind === "consent.pending") {
         // Soft ack — no UI action needed.
+      } else if (m.kind === "audit.events") {
+        setAuditEvents(m.events as AuditEvent[]);
       } else if (m.kind === "answer.chunk") {
         setAnswer({ text: m.text, citations: [] });
       } else if (m.kind === "answer.done") {
@@ -199,6 +206,12 @@ export function App() {
   }, [ws]);
 
   const send = (msg: ClientMessage) => ws?.send(msg);
+
+  useEffect(() => {
+    if (route === "audit" && ws) {
+      ws.send({ kind: "audit.query" });
+    }
+  }, [route, ws]);
 
   if (connState !== "ready") {
     return (
@@ -225,11 +238,37 @@ export function App() {
     );
   }
 
+  if (route === "audit") {
+    return (
+      <AuditScreen
+        events={auditEvents.filter(
+          (e) => !auditFilter.kind || e.kind === auditFilter.kind
+        )}
+        selfPeerId={selfPeerId}
+        filter={auditFilter}
+        onFilterChange={(next) => {
+          setAuditFilter(next);
+          const payload: { peerId?: string; kind?: string } = {};
+          if (next.peerId) payload.peerId = next.peerId;
+          send({ kind: "audit.query", ...payload });
+        }}
+        onClose={() => navigate("home")}
+      />
+    );
+  }
+
   return (
     <main className="mx-auto max-w-3xl space-y-5 p-6">
       <header className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Vault</h1>
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => navigate("audit")}
+            className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-700"
+          >
+            Audit
+          </button>
           <PeerList
             peers={peers}
             selfPeerId={selfPeerId}
