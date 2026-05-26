@@ -31,7 +31,6 @@ export async function startVault(): Promise<VaultHandle> {
   const pool = new ModelPool({
     memoryPressureFloor: 0.6,
     onMemoryPressure: (info) => {
-      // eslint-disable-next-line no-console
       console.warn(`[vault] memory pressure: rss=${info.rss} total=${info.total}`);
     },
   });

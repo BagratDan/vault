@@ -3,6 +3,18 @@ import tsParser from "@typescript-eslint/parser";
 import noNetworkImports from "./tools/eslint-rules/no-network-imports-outside-net.js";
 
 export default [
+  // Global ignores
+  {
+    ignores: [
+      "**/dist/**",
+      "**/node_modules/**",
+      "**/coverage/**",
+      "**/playwright-report/**",
+      "**/test-results/**",
+      "**/.vault/**",
+      "**/.data/**",
+    ],
+  },
   // Global rules for all TypeScript files under packages/ and tools/
   {
     files: ["packages/**/*.ts", "packages/**/*.tsx", "tools/**/*.ts", "tools/**/*.tsx"],

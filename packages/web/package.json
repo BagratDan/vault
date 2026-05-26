@@ -7,11 +7,11 @@
   "types": "./dist/index.d.ts",
   "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
   "scripts": {
-    "build": "echo 'web build: scaffolded in Task 24 (vite build)' && exit 0",
-    "typecheck": "echo 'web typecheck: scaffolded in Task 24' && exit 0",
-    "test": "echo 'web test: scaffolded in Task 25' && exit 0",
-    "test:unit": "echo 'web test:unit: scaffolded in Task 25' && exit 0",
-    "dev": "echo 'web dev: scaffolded in Task 24' && exit 0"
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run --dir tests",
+    "dev": "vite"
   },
   "dependencies": {
     "react": "^18.3.0",

@@ -11,11 +11,9 @@ import { startVault } from "./start.js";
 if (import.meta.url === `file://${process.argv[1]}`) {
   startVault()
     .then(({ port, peerId }) => {
-      // eslint-disable-next-line no-console
       console.log(`[vault] sidecar listening on 127.0.0.1:${port} (peerId=${peerId})`);
     })
     .catch((err) => {
-      // eslint-disable-next-line no-console
       console.error("[vault] failed to start:", err);
       process.exit(1);
     });
