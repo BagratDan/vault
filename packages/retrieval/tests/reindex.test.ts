@@ -1,12 +1,11 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { reindexAll, migrateWorkspace } from "../src/reindex.js";
 
+// Real SDK contract:
+//   ragReindex({ workspace }) → { reindexed: boolean, details?: { reason? } }
 vi.mock("@qvac/sdk", () => ({
-  ragReindex: vi.fn(async (opts: { workspace: string }) => ({
-    workspace: opts.workspace,
-    reindexed: 42,
-  })),
-  ragIngest: vi.fn(async () => ({ id: "x" })),
+  ragReindex: vi.fn(async () => ({ reindexed: true })),
+  ragSaveEmbeddings: vi.fn(async () => []),
   ragCloseWorkspace: vi.fn(async () => undefined),
   ragDeleteWorkspace: vi.fn(async () => undefined),
 }));
@@ -14,32 +13,37 @@ vi.mock("@qvac/sdk", () => ({
 describe("reindexAll", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("calls ragReindex with the given workspace and returns the count", async () => {
+  it("calls ragReindex with the given workspace and returns the boolean", async () => {
     const out = await reindexAll("vault-abc123");
-    expect(out.reindexed).toBe(42);
+    expect(out.reindexed).toBe(true);
     const { ragReindex } = await import("@qvac/sdk");
     expect(ragReindex).toHaveBeenCalledWith({ workspace: "vault-abc123" });
+  });
+
+  it("surfaces details.reason when reindex was skipped", async () => {
+    const { ragReindex } = await import("@qvac/sdk");
+    (ragReindex as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      reindexed: false,
+      details: { reason: "not enough documents" },
+    });
+    const out = await reindexAll("vault-abc123");
+    expect(out.reindexed).toBe(false);
+    expect(out.reason).toBe("not enough documents");
   });
 });
 
 describe("migrateWorkspace", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("copies all memories into the new workspace, then closes the old", async () => {
-    const memories = [
-      { memoryId: "m1" as never, body: "hello", tags: ["greeting"] },
-      { memoryId: "m2" as never, body: "world", tags: [] },
-    ];
-    const newName = await migrateWorkspace({
-      oldWorkspace: "vault-abc-v1",
-      newWorkspace: "vault-abc-v2",
-      memories: async function* () {
-        for (const m of memories) yield m;
-      },
-    });
-    expect(newName).toBe("vault-abc-v2");
-    const { ragIngest, ragCloseWorkspace } = await import("@qvac/sdk");
-    expect(ragIngest).toHaveBeenCalledTimes(2);
-    expect(ragCloseWorkspace).toHaveBeenCalledWith({ workspace: "vault-abc-v1" });
+  it("throws — atomic-swap migration is deferred to Plan 3", async () => {
+    await expect(
+      migrateWorkspace({
+        oldWorkspace: "vault-abc-v1",
+        newWorkspace: "vault-abc-v2",
+        memories: async function* () {
+          // no-op
+        },
+      })
+    ).rejects.toThrow(/not implemented in Plan 1/);
   });
 });

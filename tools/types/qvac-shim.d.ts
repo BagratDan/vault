@@ -1,10 +1,11 @@
 // Ambient declarations for symbols @qvac/sdk re-exports via extension-less
 // relative paths in its dist/index.d.ts. NodeNext module resolution refuses
 // to follow those re-exports, so TypeScript reports TS2305 even though the
-// runtime imports work fine (verified by vitest + direct node import).
+// runtime imports work fine.
 //
-// We declare ONLY the surface Vault actually uses, with permissive shapes —
-// downstream code passes these values through to QVAC unchanged.
+// These shapes match the REAL SDK v0.11.0 runtime contract documented in
+// the dist/.d.ts files. Verified against
+// node_modules/.../@qvac/sdk/dist/client/api/*.d.ts.
 declare module "@qvac/sdk" {
   // Provider lifecycle
   export function startQVACProvider(): Promise<void>;
@@ -12,79 +13,125 @@ declare module "@qvac/sdk" {
   export function state(): Promise<unknown>;
   export function heartbeat(): Promise<unknown>;
 
-  // Model lifecycle
+  // Model lifecycle. loadModel returns the modelId STRING (decorated with
+  // a synchronous .requestId for cancel()). modelType is inferred from
+  // modelSrc when it's a registry-constant descriptor.
   export function loadModel(opts: {
     modelSrc: unknown;
-    modelType: string;
+    modelType?: string;
+    modelConfig?: Record<string, unknown>;
     onProgress?: (p: unknown) => void;
-  }): Promise<{ modelId: string } & Record<string, unknown>>;
+  }): Promise<string>;
   export function unloadModel(opts: { modelId: string }): Promise<void>;
 
-  // Inference workloads
+  // Completion. Returns CompletionRun — events / final are canonical;
+  // .text is the legacy convenience (Promise<string>).
+  export interface CompletionRun {
+    requestId: string;
+    events: AsyncIterable<unknown>;
+    final: Promise<{
+      contentText: string;
+      thinkingText?: string;
+      raw: { fullText: string };
+    }>;
+    text: Promise<string>;
+    tokenStream: AsyncGenerator<string>;
+  }
   export function completion(opts: {
     modelId: string;
     history: ReadonlyArray<{ role: string; content: string }>;
-    temperature?: number;
-    maxTokens?: number;
-  }): Promise<{
-    tokenStream: AsyncIterable<string>;
-    final?: { text: string };
+    stream?: boolean;
+  }): CompletionRun;
+
+  // Transcribe. Params use `audioChunk` (file path OR audio buffer).
+  // Returns joined text by default; `metadata: true` returns segments.
+  export interface TranscribeSegment {
+    text: string;
+    startMs: number;
+    endMs: number;
+    confidence?: number;
+    speaker?: string;
+  }
+  export function transcribe(opts: {
+    modelId: string;
+    audioChunk: Uint8Array | string;
+    prompt?: string;
+    metadata?: false;
+  }): Promise<string>;
+  export function transcribe(opts: {
+    modelId: string;
+    audioChunk: Uint8Array | string;
+    prompt?: string;
+    metadata: true;
+  }): Promise<TranscribeSegment[]>;
+
+  // Embed. Single text -> { embedding: number[] }; array -> number[][].
+  export function embed(opts: { modelId: string; text: string }): Promise<{
+    embedding: number[];
+  }>;
+  export function embed(opts: { modelId: string; text: string[] }): Promise<{
+    embedding: number[][];
   }>;
 
-  export function transcribe(opts: { audio: Uint8Array } | Record<string, unknown>): Promise<{
-    segments: ReadonlyArray<{
-      text: string;
-      startMs: number;
-      endMs: number;
-      confidence: number;
-      speaker?: string;
-    }>;
-    durationMs: number;
-  }>;
-
-  export function embed(opts: { input: string | string[] } | Record<string, unknown>): Promise<{
-    embeddings: number[][];
-  }>;
-
-  export function textToSpeechStream(opts: {
+  // TTS — one-shot synth that yields PCM samples (numbers, not bytes).
+  export interface TextToSpeechStreamResult {
+    bufferStream: AsyncGenerator<number>;
+    buffer: Promise<number[]>;
+    done: Promise<boolean>;
+  }
+  export function textToSpeech(opts: {
     modelId: string;
     text: string;
-  } | Record<string, unknown>): Promise<{
-    audioStream: AsyncIterable<Uint8Array>;
-  }>;
+    stream?: boolean;
+  }): TextToSpeechStreamResult;
 
-  // RAG primitives
-  export function ragIngest(opts: {
-    workspace: string;
-    doc: {
-      id: string;
-      text: string;
-      metadata?: Record<string, string>;
-    };
-  } | Record<string, unknown>): Promise<{ id: string }>;
+  // RAG primitives. All require modelId (the embedding model) to be loaded.
+  // The "segregated flow" (chunk → embed → saveEmbeddings) is the only
+  // path that lets us pass our own document ids and metadata; ragIngest
+  // string-mode auto-generates ids which doesn't fit Vault's memoryId
+  // contract.
+  export interface RagEmbeddedDoc {
+    id: string;
+    content: string;
+    embedding: number[];
+    embeddingModelId: string;
+    metadata?: Record<string, unknown>;
+  }
+  export function ragSaveEmbeddings(opts: {
+    workspace?: string;
+    documents: RagEmbeddedDoc[];
+    modelId?: string;
+  }): Promise<
+    Array<{ status: "fulfilled" | "rejected"; id?: string; error?: string }>
+  >;
 
+  export interface RagSearchResultItem {
+    id: string;
+    content: string;
+    score: number;
+  }
   export function ragSearch(opts: {
-    workspace: string;
+    modelId: string;
     query: string;
-    limit: number;
-  } | Record<string, unknown>): Promise<{
-    results: Array<{
-      id: string;
-      score: number;
-      snippet: string;
-      metadata: Record<string, string>;
-    }>;
+    topK?: number;
+    workspace?: string;
+  }): Promise<RagSearchResultItem[]>;
+
+  export function ragDeleteEmbeddings(opts: {
+    modelId?: string;
+    workspace?: string;
+    ids: string[];
+  }): Promise<void>;
+
+  export function ragReindex(opts: { workspace?: string }): Promise<{
+    reindexed: boolean;
+    details?: { reason?: string };
   }>;
+  export function ragCloseWorkspace(opts: { workspace?: string }): Promise<void>;
+  export function ragDeleteWorkspace(opts: { workspace?: string }): Promise<void>;
 
-  export function ragReindex(opts: { workspace: string } | Record<string, unknown>): Promise<{
-    workspace: string;
-    reindexed: number;
-  }>;
-
-  export function ragCloseWorkspace(opts: { workspace: string } | Record<string, unknown>): Promise<void>;
-  export function ragDeleteWorkspace(opts: { workspace: string } | Record<string, unknown>): Promise<void>;
-
-  // Model registry constants (subset Vault pins)
+  // Model registry constants Vault pins. Real shapes are complex literal
+  // objects with name, src, engine, etc. — we only pass them through.
   export const LLAMA_3_2_1B_INST_Q4_0: Readonly<Record<string, unknown>>;
   export const EMBEDDINGGEMMA_300M_Q4_0: Readonly<Record<string, unknown>>;
   export const TTS_EN_ES_CHATTERBOX_Q4F16: Readonly<Record<string, unknown>>;

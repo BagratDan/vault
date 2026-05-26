@@ -7,6 +7,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      require-asset:
+        specifier: ^1.2.2
+        version: 1.2.2(bare-url@2.4.3)
     devDependencies:
       '@types/node':
         specifier: ^22.7.0
@@ -5783,7 +5787,6 @@ snapshots:
       bare-module-resolve: 1.12.2(bare-url@2.4.3)
     transitivePeerDependencies:
       - bare-url
-    optional: true
 
   resolve-from@4.0.0: {}
 

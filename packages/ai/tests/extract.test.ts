@@ -6,12 +6,20 @@ let completionCalls = 0;
 let completionResponses: string[] = [];
 
 vi.mock("@qvac/sdk", () => ({
-  loadModel: vi.fn().mockResolvedValue({ modelId: "llama" }),
+  loadModel: vi.fn(async () => "llama"),
   unloadModel: vi.fn().mockResolvedValue(undefined),
-  completion: vi.fn(async () => {
+  // Real SDK: completion(...) returns CompletionRun synchronously with
+  // text: Promise<string>. Vault's complete() wrapper awaits run.text.
+  completion: vi.fn(() => {
     const resp = completionResponses[completionCalls] ?? "{}";
     completionCalls++;
-    return { final: { text: resp }, tokenStream: (async function* () {})() };
+    return {
+      requestId: "mock-req",
+      events: (async function* () {})(),
+      final: Promise.resolve({ contentText: resp, raw: { fullText: resp } }),
+      text: Promise.resolve(resp),
+      tokenStream: (async function* () {})(),
+    };
   }),
   LLAMA_3_2_1B_INST_Q4_0: { id: "llm" },
   EMBEDDINGGEMMA_300M_Q4_0: { id: "emb" },

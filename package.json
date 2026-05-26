@@ -20,10 +20,13 @@
   },
   "devDependencies": {
     "@types/node": "^22.7.0",
-    "eslint": "^9.13.0",
-    "@typescript-eslint/parser": "^8.12.0",
     "@typescript-eslint/eslint-plugin": "^8.12.0",
-    "typescript": "^5.5.0",
-    "tsx": "^4.19.0"
+    "@typescript-eslint/parser": "^8.12.0",
+    "eslint": "^9.13.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "require-asset": "^1.2.2"
   }
 }

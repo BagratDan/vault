@@ -4,7 +4,13 @@ import {
   type SourceRecord,
   type Relationship,
 } from "@vault/domain";
-import { extractFromText, transcribeAudio, type ModelPool } from "@vault/ai";
+import {
+  ensureEmbedModel,
+  embedText,
+  extractFromText,
+  transcribeAudio,
+  type ModelPool,
+} from "@vault/ai";
 import { Repo, Indexes } from "@vault/sync";
 import { Workspace, search } from "@vault/retrieval";
 import { VaultFs } from "../vault-fs.js";
@@ -52,16 +58,21 @@ export async function captureText(
     ownerPeerId: deps.ownerPeerId,
   });
 
-  // 3. Dedup check (spec §9.3 step 6). Query @qvac/rag for the top-1
-  // existing memory matching the new body; if its similarity score is
-  // at or above the threshold, we DON'T ingest a new memory — instead
-  // we link the existing one with a Relationship(type='duplicate-of').
-  // The candidate Memory is dropped; the SourceRecord we already wrote
-  // remains as evidence of the duplicate capture.
+  // 3. Embed the memory body. The same vector is reused for dedup-search
+  //    and for the workspace ingest below, so we only run the embedding
+  //    model once per capture. Loads the model on first call.
+  const embedModelId = await ensureEmbedModel(deps.pool);
+  const vector = await embedText(deps.pool, ext.memory.body);
+
+  // 4. Dedup check (spec §9.3 step 6). Query @qvac/rag for the top-1
+  //    existing memory matching the new body; if its similarity score is
+  //    at or above the threshold, we DON'T ingest a new memory — instead
+  //    we link the existing one with a Relationship(type='duplicate-of').
   const DEDUP_THRESHOLD = 0.92;
   let duplicateOf: string | undefined;
   try {
     const hits = await search({
+      modelId: embedModelId,
       workspace: deps.workspace.getName(),
       query: ext.memory.body,
       k: 1,
@@ -87,7 +98,7 @@ export async function captureText(
     // fall through and ingest as new.
   }
 
-  // 4. Persist all entities
+  // 5. Persist all entities
   await deps.repo.putMemory(ext.memory);
   for (const p of ext.people) await deps.repo.putPerson(p);
   for (const pl of ext.places) await deps.repo.putPlace(pl);
@@ -95,7 +106,7 @@ export async function captureText(
   for (const t of ext.tasks) await deps.repo.putTask(t);
   for (const r of ext.externalRefs) await deps.repo.putExternalRef(r);
 
-  // 5. Secondary indexes (tags from extraction + user-provided tags merged)
+  // 6. Secondary indexes (tags from extraction + user-provided tags merged)
   const allTags = [...ext.memory.tags, ...input.tags];
   await deps.indexes.indexTags(ext.memory.id, allTags);
   await deps.indexes.indexPersons(
@@ -103,11 +114,13 @@ export async function captureText(
     ext.people.map((p) => p.id)
   );
 
-  // 6. Ingest into @qvac/rag workspace (computes + stores the embedding)
+  // 7. Save the pre-computed embedding into the @qvac/rag workspace.
   await deps.workspace.ingest({
     memoryId: asUlid(ext.memory.id),
     body: ext.memory.body,
     tags: ext.memory.tags,
+    embedding: vector,
+    embeddingModelId: embedModelId,
     metadata: {
       ownerPeerId: deps.ownerPeerId,
       createdAt: ext.memory.createdAt,

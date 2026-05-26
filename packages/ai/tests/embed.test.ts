@@ -2,14 +2,16 @@ import { describe, expect, it, beforeEach, vi } from "vitest";
 import { embedText } from "../src/embed.js";
 import { ModelPool } from "../src/model-pool.js";
 
+// Real SDK contract: embed({ modelId, text }) → { embedding: number[] }
+// (single) or { embedding: number[][] } (array).
 vi.mock("@qvac/sdk", () => ({
-  loadModel: vi.fn().mockResolvedValue({ modelId: "emb-gemma" }),
+  loadModel: vi.fn(async () => "emb-gemma"),
   unloadModel: vi.fn().mockResolvedValue(undefined),
-  embed: vi.fn(async (opts: { input: string | string[] }) => {
-    if (Array.isArray(opts.input)) {
-      return { embeddings: opts.input.map(() => Array(384).fill(0.1)) };
+  embed: vi.fn(async (opts: { text: string | string[] }) => {
+    if (Array.isArray(opts.text)) {
+      return { embedding: opts.text.map(() => Array(384).fill(0.1)) };
     }
-    return { embeddings: [Array(384).fill(0.1)] };
+    return { embedding: Array(384).fill(0.1) };
   }),
   LLAMA_3_2_1B_INST_Q4_0: { id: "llm" },
   EMBEDDINGGEMMA_300M_Q4_0: { id: "emb" },

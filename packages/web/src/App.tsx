@@ -19,6 +19,10 @@ export function App() {
   );
   const [filters, setFilters] = useState<Filters>({});
   const [playing, setPlaying] = useState(false);
+  const [banner, setBanner] = useState<
+    | { kind: "info" | "success" | "error"; text: string }
+    | null
+  >(null);
   const audioQueue = useRef<{ queue: string[]; el: HTMLAudioElement | null }>({
     queue: [],
     el: null,
@@ -68,6 +72,15 @@ export function App() {
     return ws.onMessage((m) => {
       if (m.kind === "search.hits") {
         setHits(m.hits);
+      } else if (m.kind === "capture.ack") {
+        setBanner(
+          m.duplicateOf
+            ? { kind: "info", text: `Duplicate of memory ${m.duplicateOf.slice(0, 8)}` }
+            : { kind: "success", text: `Saved memory ${m.memoryId.slice(0, 8)}` }
+        );
+      } else if (m.kind === "error") {
+        const short = m.message.length > 240 ? m.message.slice(0, 240) + "…" : m.message;
+        setBanner({ kind: "error", text: `${m.code}: ${short}` });
       } else if (m.kind === "answer.chunk") {
         setAnswer({ text: m.text, citations: [] });
       } else if (m.kind === "answer.done") {
@@ -97,6 +110,8 @@ export function App() {
         <h1 className="text-xl font-semibold">Vault</h1>
         <ModelStatus state={connState} />
       </header>
+
+      {banner && <Banner banner={banner} onDismiss={() => setBanner(null)} />}
 
       <CapturePane
         onSubmitText={(text, tags) => send({ kind: "capture.text", text, tags })}
@@ -148,5 +163,43 @@ export function App() {
         ))}
       </div>
     </main>
+  );
+}
+
+interface BannerProps {
+  banner: { kind: "info" | "success" | "error"; text: string };
+  onDismiss: () => void;
+}
+
+function Banner({ banner, onDismiss }: BannerProps) {
+  const className =
+    "rounded-xl px-4 py-2 text-sm " +
+    (banner.kind === "error"
+      ? "bg-rose-950 text-rose-200 ring-1 ring-rose-900"
+      : banner.kind === "success"
+        ? "bg-emerald-950 text-emerald-200 ring-1 ring-emerald-900"
+        : "bg-slate-800 text-slate-200 ring-1 ring-slate-700");
+  const inner = (
+    <div className="flex items-center justify-between gap-3">
+      <span className="break-words">{banner.text}</span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="text-xs text-slate-400 hover:text-slate-200"
+        aria-label="dismiss"
+      >
+        ✕
+      </button>
+    </div>
+  );
+  // Two static role branches so jsx-a11y/aria-role can resolve them.
+  return banner.kind === "error" ? (
+    <div role="alert" className={className}>
+      {inner}
+    </div>
+  ) : (
+    <div role="status" className={className}>
+      {inner}
+    </div>
   );
 }

@@ -2,15 +2,23 @@ import { describe, expect, it, beforeEach, vi } from "vitest";
 import { synthesizeStream } from "../src/tts.js";
 import { ModelPool } from "../src/model-pool.js";
 
+// Real SDK contract: textToSpeech({ modelId, text, stream: true }) returns
+// { bufferStream: AsyncGenerator<number>, buffer, done }. bufferStream
+// yields individual PCM samples (floats in [-1, 1]).
 vi.mock("@qvac/sdk", () => ({
-  loadModel: vi.fn().mockResolvedValue({ modelId: "chatterbox" }),
+  loadModel: vi.fn(async () => "chatterbox"),
   unloadModel: vi.fn().mockResolvedValue(undefined),
-  textToSpeechStream: vi.fn(async () => ({
-    audioStream: (async function* () {
-      yield new Uint8Array([1, 2, 3]);
-      yield new Uint8Array([4, 5]);
-    })(),
-  })),
+  textToSpeech: vi.fn(() => {
+    // 5 samples -> single 10-byte PCM16 chunk (5 < SAMPLE_BATCH=2048).
+    const samples = [0.1, 0.2, 0.3, -0.1, -0.2];
+    return {
+      bufferStream: (async function* () {
+        for (const s of samples) yield s;
+      })(),
+      buffer: Promise.resolve(samples),
+      done: Promise.resolve(true),
+    };
+  }),
   LLAMA_3_2_1B_INST_Q4_0: { id: "llm" },
   EMBEDDINGGEMMA_300M_Q4_0: { id: "emb" },
   TTS_EN_ES_CHATTERBOX_Q4F16: { id: "tts" },
@@ -27,12 +35,13 @@ describe("synthesizeStream", () => {
     vi.clearAllMocks();
   });
 
-  it("yields audio chunks", async () => {
+  it("yields PCM-16 byte chunks", async () => {
     const chunks: Uint8Array[] = [];
     for await (const c of synthesizeStream(pool, "hello")) {
       chunks.push(c);
     }
-    expect(chunks).toHaveLength(2);
-    expect(Array.from(chunks[0]!)).toEqual([1, 2, 3]);
+    // 5 samples → 10 bytes in a single sub-batch chunk.
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]!.byteLength).toBe(10);
   });
 });

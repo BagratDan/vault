@@ -1,5 +1,5 @@
 import {
-  ragIngest,
+  ragSaveEmbeddings,
   ragCloseWorkspace,
   ragDeleteWorkspace,
 } from "@qvac/sdk";
@@ -16,6 +16,12 @@ export interface IngestInput {
   memoryId: Ulid;
   body: string;
   tags: readonly string[];
+  /** Pre-computed embedding for `body`. Computed in the capture pipeline
+   *  via @vault/ai's `embedText` so the workspace doesn't have to know
+   *  about the model pool. */
+  embedding: number[];
+  /** SDK modelId of the embedding model that produced `embedding`. */
+  embeddingModelId: string;
   /** Optional metadata bag persisted alongside the embedding. */
   metadata?: Record<string, string>;
 }
@@ -34,17 +40,21 @@ export class Workspace {
 
   async ingest(input: IngestInput): Promise<void> {
     this.ensureOpen();
-    await ragIngest({
+    await ragSaveEmbeddings({
       workspace: this.name,
-      doc: {
-        id: input.memoryId,
-        text: input.body,
-        metadata: {
-          memoryId: input.memoryId,
-          tags: input.tags.join(","),
-          ...(input.metadata ?? {}),
+      documents: [
+        {
+          id: input.memoryId,
+          content: input.body,
+          embedding: input.embedding,
+          embeddingModelId: input.embeddingModelId,
+          metadata: {
+            memoryId: input.memoryId,
+            tags: input.tags.join(","),
+            ...(input.metadata ?? {}),
+          },
         },
-      },
+      ],
     });
   }
 

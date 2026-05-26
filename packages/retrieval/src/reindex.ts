@@ -1,11 +1,21 @@
-import { ragReindex, ragIngest, ragCloseWorkspace } from "@qvac/sdk";
+import { ragReindex } from "@qvac/sdk";
 import type { Ulid } from "@vault/domain";
 
-export async function reindexAll(
-  workspace: string
-): Promise<{ workspace: string; reindexed: number }> {
+/** Reindex the workspace. SDK reindex requires a minimum number of
+ *  documents (default 16 for HyperDB); below that returns `reindexed:
+ *  false` with `details.reason`. */
+export async function reindexAll(workspace: string): Promise<{
+  reindexed: boolean;
+  reason?: string;
+}> {
   const result = await ragReindex({ workspace });
-  return result;
+  const out: { reindexed: boolean; reason?: string } = {
+    reindexed: result.reindexed,
+  };
+  if (!result.reindexed && result.details?.reason) {
+    out.reason = result.details.reason;
+  }
+  return out;
 }
 
 export interface MemoryForMigration {
@@ -14,24 +24,15 @@ export interface MemoryForMigration {
   tags: readonly string[];
 }
 
-export interface MigrateInput {
+/** Workspace migration (atomic-pointer-swap pattern) is a Plan-3 feature.
+ *  In v1 the migration path is: stop the sidecar, delete the workspace
+ *  on disk, restart — the capture pipeline re-ingests on next launch. */
+export async function migrateWorkspace(_input: {
   oldWorkspace: string;
   newWorkspace: string;
-  /** Async iterator yielding every memory to copy. Allows streaming a large index. */
   memories: () => AsyncIterable<MemoryForMigration>;
-}
-
-export async function migrateWorkspace(input: MigrateInput): Promise<string> {
-  for await (const m of input.memories()) {
-    await ragIngest({
-      workspace: input.newWorkspace,
-      doc: {
-        id: m.memoryId,
-        text: m.body,
-        metadata: { memoryId: m.memoryId, tags: m.tags.join(",") },
-      },
-    });
-  }
-  await ragCloseWorkspace({ workspace: input.oldWorkspace });
-  return input.newWorkspace;
+}): Promise<string> {
+  throw new Error(
+    "migrateWorkspace: not implemented in Plan 1. See README known-limitations."
+  );
 }

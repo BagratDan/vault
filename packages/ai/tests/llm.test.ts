@@ -3,16 +3,24 @@ import { complete, completeStream, type ChatMessage } from "../src/llm.js";
 import { ModelPool } from "../src/model-pool.js";
 
 vi.mock("@qvac/sdk", () => ({
-  loadModel: vi.fn().mockResolvedValue({ modelId: "llama" }),
+  loadModel: vi.fn(async () => "llama"),
   unloadModel: vi.fn().mockResolvedValue(undefined),
-  completion: vi.fn(async () => {
+  // Real SDK contract: completion(...) returns a CompletionRun synchronously
+  // (not a Promise) with `text: Promise<string>`, `tokenStream`, etc.
+  completion: vi.fn(() => {
+    const tokens = ["Hello", " from", " mock"];
+    const joined = "Hello from mock";
     return {
+      requestId: "mock-req",
+      events: (async function* () {})(),
+      final: Promise.resolve({
+        contentText: joined,
+        raw: { fullText: joined },
+      }),
+      text: Promise.resolve(joined),
       tokenStream: (async function* () {
-        yield "Hello";
-        yield " from";
-        yield " mock";
+        for (const t of tokens) yield t;
       })(),
-      final: { text: "Hello from mock" },
     };
   }),
   LLAMA_3_2_1B_INST_Q4_0: { id: "llm" },
