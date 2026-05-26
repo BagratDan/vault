@@ -243,12 +243,18 @@ async function routeMessage(
                 : {}),
             }
           : undefined;
+        // selfPeerId stamped on hits MUST match the peerId used in the
+        // roster + vault.status reply (= the autobee writer key), so the
+        // web UI can correctly compare h.ownerPeerId against selfPeerId
+        // to suppress "Request access" on the user's own memories.
+        const stampedPeerId =
+          deps.runtime.state?.selfPeerId ?? deps.identity.peerId;
         const hits = await runSearch(
           {
             pool: deps.pool,
             workspace: deps.workspace,
             swarm: deps.runtime.swarm,
-            selfPeerId: deps.identity.peerId,
+            selfPeerId: stampedPeerId,
           },
           {
             query: msg.query,
@@ -289,6 +295,26 @@ async function routeMessage(
             },
           ],
         };
+      });
+    }
+    case "memory.list": {
+      return requireVaultActive(deps, async () => {
+        const all = await deps.getRepo().listMemories();
+        // Sort newest first, cap at limit (default 50).
+        const limit = msg.limit ?? 50;
+        const sorted = [...all].sort((a, b) =>
+          b.createdAt.localeCompare(a.createdAt)
+        );
+        const memories = sorted.slice(0, limit).map((m) => ({
+          memoryId: m.id,
+          summary: m.summary,
+          body: m.body,
+          tags: m.tags,
+          createdAt: m.createdAt,
+          ownerPeerId: m.ownerPeerId,
+          confidence: m.confidence,
+        }));
+        return { kind: "memory.list", memories };
       });
     }
     case "tts.play": {

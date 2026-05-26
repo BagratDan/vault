@@ -32,6 +32,11 @@ const memoryGet = z.object({
   memoryId: z.string(),
 });
 
+const memoryList = z.object({
+  kind: z.literal("memory.list"),
+  limit: z.number().int().positive().optional(),
+});
+
 const ttsPlay = z.object({
   kind: z.literal("tts.play"),
   text: z.string().min(1),
@@ -96,6 +101,7 @@ export const clientMessageShape = z.discriminatedUnion("kind", [
   captureAudio,
   searchRun,
   memoryGet,
+  memoryList,
   ttsPlay,
   vaultStatus,
   vaultCreate,
@@ -128,6 +134,21 @@ const searchHits = z.object({
       snippet: z.string(),
       ownerPeerId: z.string().optional(),
       tags: z.array(z.string()),
+    })
+  ),
+});
+
+const memoryListReply = z.object({
+  kind: z.literal("memory.list"),
+  memories: z.array(
+    z.object({
+      memoryId: z.string(),
+      summary: z.string(),
+      body: z.string(),
+      tags: z.array(z.string()),
+      createdAt: z.string(),
+      ownerPeerId: z.string(),
+      confidence: z.number(),
     })
   ),
 });
@@ -268,6 +289,7 @@ const adminRevokeAckReply = z.object({
 export const serverMessageShape = z.discriminatedUnion("kind", [
   captureAck,
   searchHits,
+  memoryListReply,
   answerChunk,
   answerDone,
   ttsChunk,

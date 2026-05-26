@@ -37,6 +37,11 @@ export function AdminPane({
           ← back
         </button>
       </header>
+      {members.length <= 1 && (
+        <p className="mb-3 rounded-xl bg-slate-900 p-3 text-xs text-slate-400 ring-1 ring-slate-800">
+          You're the only member right now. Open the peer drawer in the header (the "{members.length} peer" chip) and click <span className="font-medium text-slate-200">Create invite</span> to add someone — they paste the token in their own client and join the vault.
+        </p>
+      )}
       <ul className="space-y-2">
         {members.map((m) => {
           const isSelf = m.peerId === selfPeerId;

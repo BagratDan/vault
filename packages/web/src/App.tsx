@@ -44,6 +44,15 @@ export function App() {
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [auditFilter, setAuditFilter] = useState<{ peerId?: string; kind?: string }>({});
   const [adminMembers, setAdminMembers] = useState<AdminMember[]>([]);
+  const [library, setLibrary] = useState<Array<{
+    memoryId: string;
+    summary: string;
+    body: string;
+    tags: string[];
+    createdAt: string;
+    ownerPeerId: string;
+    confidence: number;
+  }>>([]);
   const route = useHashRoute();
   const toastsRef = useRef<IncomingRequest[]>([]);
   const pendingScopes = useRef<Array<"metadata" | "snippet" | "file">>([]);
@@ -104,10 +113,14 @@ export function App() {
         if (m.selfPeerId) setSelfPeerId(m.selfPeerId);
         if (m.state === "admin" || m.state === "member") {
           ws.send({ kind: "peer.list" });
+          ws.send({ kind: "memory.list" });
         }
       } else if (m.kind === "vault.created" || m.kind === "vault.joined") {
         ws.send({ kind: "vault.status" });
         ws.send({ kind: "peer.list" });
+        ws.send({ kind: "memory.list" });
+      } else if (m.kind === "memory.list") {
+        setLibrary(m.memories);
       } else if (m.kind === "peer.list") {
         setPeers(m.peers);
       } else if (m.kind === "peer.connected") {
@@ -136,6 +149,8 @@ export function App() {
           });
           pendingScopes.current = [];
         }
+        // Refresh library list so the new memory appears in the home view.
+        ws.send({ kind: "memory.list" });
       } else if (m.kind === "error") {
         const short = m.message.length > 240 ? m.message.slice(0, 240) + "…" : m.message;
         setBanner({ kind: "error", text: `${m.code}: ${short}` });
@@ -449,6 +464,60 @@ export function App() {
           </p>
         )}
       </section>
+
+      <section className="rounded-2xl bg-slate-900 p-5 shadow">
+        <div className="mb-3 flex items-baseline justify-between">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">
+            Library
+          </h2>
+          <span className="text-xs text-slate-500">
+            {library.length} {library.length === 1 ? "memory" : "memories"}
+          </span>
+        </div>
+        {library.length === 0 ? (
+          <p className="text-xs text-slate-500">
+            Nothing captured yet. Use the Capture box above — text, recording, or audio file
+            import — and your memories will show up here.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {library.map((m) => (
+              <li
+                key={m.memoryId}
+                className="rounded-xl bg-slate-800 p-3 ring-1 ring-slate-800/60"
+              >
+                <div className="mb-1 flex items-baseline justify-between gap-2">
+                  <span className="font-mono text-xs text-slate-500">
+                    {m.memoryId.slice(0, 8)}
+                  </span>
+                  <span className="font-mono text-xs text-slate-500">
+                    {new Date(m.createdAt).toLocaleString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                </div>
+                <p className="text-sm text-slate-100">{m.summary}</p>
+                {m.tags.length > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {m.tags.map((t) => (
+                      <span
+                        key={t}
+                        className="rounded-full bg-slate-700 px-2 py-0.5 text-xs text-slate-300"
+                      >
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
       <ToastQueue
         toasts={toasts}
         onRespond={(consentRequestId, decision) =>

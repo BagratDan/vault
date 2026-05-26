@@ -72,8 +72,12 @@ export async function startVault(): Promise<VaultHandle> {
   // Currently: search.probe (federated search). Plan 3 will add consent.request.
   const rpcHandler = async (method: string, params: unknown): Promise<unknown> => {
     if (method === "search.probe") {
+      // Stamp the autobee writer peerId (same key the roster uses) so the
+      // requester can correlate ownerPeerId against the roster + their own
+      // vault.status.selfPeerId.
+      const stampedPeerId = runtime.state?.selfPeerId ?? identity.peerId;
       return handleSearchProbe(
-        { pool, workspace, selfPeerId: identity.peerId },
+        { pool, workspace, selfPeerId: stampedPeerId },
         params as { v: 1; requestId: string; query: string; k: number }
       );
     }

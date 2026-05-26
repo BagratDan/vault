@@ -17,6 +17,7 @@ export type ClientMessage =
       };
     }
   | { kind: "memory.get"; memoryId: string }
+  | { kind: "memory.list"; limit?: number }
   | { kind: "tts.play"; text: string; requestId: string }
   | { kind: "vault.status" }
   | { kind: "vault.create"; displayName: string }
@@ -60,6 +61,18 @@ export interface Citation {
 export type ServerMessage =
   | { kind: "capture.ack"; memoryId: string; duplicateOf?: string }
   | { kind: "search.hits"; hits: Hit[] }
+  | {
+      kind: "memory.list";
+      memories: Array<{
+        memoryId: string;
+        summary: string;
+        body: string;
+        tags: string[];
+        createdAt: string;
+        ownerPeerId: string;
+        confidence: number;
+      }>;
+    }
   | { kind: "answer.chunk"; requestId: string; text: string }
   | { kind: "answer.done"; requestId: string; citations: Citation[] }
   | { kind: "tts.chunk"; requestId: string; audioBase64: string }

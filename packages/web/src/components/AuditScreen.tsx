@@ -102,6 +102,13 @@ export function AuditScreen({
           {events.length} event(s)
         </p>
       )}
+      {events.length === 0 && (
+        <p className="mt-4 rounded-xl bg-slate-900 p-4 text-xs text-slate-400 ring-1 ring-slate-800">
+          No audit events yet. Events appear here when a peer requests one of your memories — or
+          when you request access to one of theirs. Every request, approval, denial, and expiry
+          is recorded on this peer's append-only log.
+        </p>
+      )}
       <ol className="space-y-2">
         {events.map((e) => {
           const peer =
