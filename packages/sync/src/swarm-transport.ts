@@ -2,9 +2,28 @@ import Hyperswarm from "hyperswarm";
 import b4a from "b4a";
 import { wireRpc, type DuplexLike, type RpcHandler, type RpcSession } from "./swarm.js";
 
+/**
+ * MemberClaim — sent over the Hyperswarm RPC channel on first peer
+ * connect. Lives only on the wire (never persisted). The receiving peer
+ * (admin) verifies the Ed25519 signature, checks the vaultId matches,
+ * and writes a Member record on the claimant's behalf.
+ */
+export interface MemberClaim {
+  v: 1;
+  vaultId: string;
+  peerId: string;       // hex(32) — same as publicKey for Ed25519
+  publicKey: string;    // hex(32)
+  displayName: string;
+  ts: string;           // ISO8601
+  sig: string;          // Ed25519 sig over canonical(claim - sig)
+}
+
 export interface SwarmEvents {
   onPeerConnect?: (peerId: string, session: RpcSession) => Promise<void> | void;
   onPeerDisconnect?: (peerId: string) => void;
+  /** Called when a peer sends us a member.claim RPC. Admins use this
+   *  to verify + admit; non-admin peers can ignore (no-op). */
+  onClaim?: (peerId: string, claim: MemberClaim) => Promise<void> | void;
 }
 
 /**
@@ -51,7 +70,16 @@ export class SwarmTransport {
         this.events.onPeerDisconnect?.(peerPk);
       });
 
-      const session = wireRpc(duplex, this.handler);
+      // Intercept member.claim before falling through to the generic handler
+      // so admins can wire admission logic via onClaim without taking over
+      // the full RPC handler shape.
+      const session = wireRpc(duplex, async (method, params) => {
+        if (method === "member.claim") {
+          await this.events.onClaim?.(peerPk, params as MemberClaim);
+          return { ok: true };
+        }
+        return this.handler(method, params);
+      });
       this.connections.set(peerPk, session);
       void this.events.onPeerConnect?.(peerPk, session);
     });
@@ -68,6 +96,13 @@ export class SwarmTransport {
     const session = this.connections.get(peerId);
     if (!session) throw new Error(`no rpc session for peer ${peerId}`);
     return session.request(method, params);
+  }
+
+  /** Send a MemberClaim to a specific peer. Members call this on connect. */
+  async sendClaim(peerId: string, claim: MemberClaim): Promise<void> {
+    const session = this.connections.get(peerId);
+    if (!session) return;
+    await session.request("member.claim", claim);
   }
 
   async broadcast(

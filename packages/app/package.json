@@ -20,6 +20,7 @@
     "@vault/ai": "workspace:*",
     "@vault/retrieval": "workspace:*",
     "@vault/sync": "workspace:*",
+    "b4a": "^1.6.6",
     "zod": "^4.3.0",
     "ulid": "^2.3.0"
   },

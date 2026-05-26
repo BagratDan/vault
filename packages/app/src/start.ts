@@ -7,8 +7,13 @@ import {
   Repo,
   SwarmTransport,
   openAutobeeStore,
+  signCanonical,
+  verifyCanonical,
+  type MemberClaim,
 } from "@vault/sync";
 import { Workspace } from "@vault/retrieval";
+import { newUlid } from "@vault/domain";
+import b4a from "b4a";
 import { loadConfig } from "./config.js";
 import { VaultFs } from "./vault-fs.js";
 import { loadOrCreateIdentity } from "./identity.js";
@@ -72,14 +77,76 @@ export async function startVault(): Promise<VaultHandle> {
     const swarm = new SwarmTransport(
       (method, params) => rpcHandler(method, params),
       {
-        onPeerConnect: (peerId) => {
+        onPeerConnect: async (peerId) => {
           broadcastToClients({
             kind: "peer.connected",
             peer: { peerId, displayName: peerId.slice(0, 8) },
           });
+          // Members send a signed MemberClaim on first connect so the
+          // admin can admit them. The store's local key is the writer
+          // identity; we sign with it.
+          if (state.role === "member" && runtime.store) {
+            const claimBody = {
+              v: 1 as const,
+              vaultId: state.vaultId,
+              peerId: state.selfPeerId,
+              publicKey: state.selfPeerId,
+              displayName: state.displayName,
+              ts: new Date().toISOString(),
+            };
+            const claim: MemberClaim = {
+              ...claimBody,
+              sig: signCanonical(claimBody, runtime.store.secretKey),
+            };
+            try {
+              await swarm.sendClaim(peerId, claim);
+            } catch {
+              // Best-effort. If the admin is offline, the claim will be
+              // retried on the next connection. Don't crash the swarm.
+            }
+          }
         },
         onPeerDisconnect: (peerId) => {
           broadcastToClients({ kind: "peer.disconnected", peerId });
+        },
+        onClaim: async (_peerId, claim) => {
+          // Only the admin admits new members. Others ignore.
+          if (state.role !== "admin" || !runtime.store) return;
+          if (claim.vaultId !== state.vaultId) return;
+          // Verify the claimant's signature against the embedded publicKey
+          const { sig, ...claimBody } = claim;
+          let pkBytes: Uint8Array;
+          try {
+            pkBytes = b4a.from(claim.publicKey, "hex");
+          } catch {
+            return;
+          }
+          if (!verifyCanonical(claimBody, sig, pkBytes)) return;
+          // Write Member record signed by admin
+          const now = new Date().toISOString();
+          const memberRec = {
+            id: newUlid(),
+            createdAt: now,
+            updatedAt: now,
+            ownerPeerId: identity.peerId,
+            provenance: { kind: "user" as const },
+            kind: "member" as const,
+            peerId: claim.peerId,
+            displayName: claim.displayName,
+            role: "member" as const,
+            admittedBy: state.selfPeerId,
+            admittedAt: now,
+            publicKey: claim.publicKey,
+          };
+          await runtime.store.append({
+            kind: "member",
+            key: `member/${claim.peerId}`,
+            value: {
+              ...memberRec,
+              sig: signCanonical(memberRec, runtime.store.secretKey),
+            },
+          });
+          await runtime.store.flush();
         },
       }
     );

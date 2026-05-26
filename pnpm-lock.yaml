@@ -83,6 +83,9 @@ importers:
       '@vault/sync':
         specifier: workspace:*
         version: link:../sync
+      b4a:
+        specifier: ^1.6.6
+        version: 1.8.1
       ulid:
         specifier: ^2.3.0
         version: 2.4.0
