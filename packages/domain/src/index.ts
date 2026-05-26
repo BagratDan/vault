@@ -13,3 +13,4 @@ export * from "./member.js";
 export * from "./invite.js";
 export * from "./revocation.js";
 export * from "./consent-event.js";
+export * from "./invite-codec.js";

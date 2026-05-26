@@ -99,6 +99,12 @@ importers:
 
   packages/domain:
     dependencies:
+      b4a:
+        specifier: ^1.6.6
+        version: 1.8.1
+      hypercore-crypto:
+        specifier: ^3.4.0
+        version: 3.7.0(bare-url@2.4.3)
       ulid:
         specifier: ^2.3.0
         version: 2.4.0
@@ -158,7 +164,7 @@ importers:
         version: 1.8.1
       corestore:
         specifier: ^7.4.0
-        version: 7.9.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))(bare-url@2.4.3)
+        version: 7.9.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3)
       hyperbee:
         specifier: ^2.20.0
         version: 2.27.3(bare-abort-controller@1.1.2)
@@ -167,7 +173,7 @@ importers:
         version: 11.30.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3)
       hypercore-crypto:
         specifier: ^3.4.0
-        version: 3.7.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))(bare-url@2.4.3)
+        version: 3.7.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3)
       hyperswarm:
         specifier: ^4.8.0
         version: 4.17.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3)
@@ -4033,8 +4039,8 @@ snapshots:
       b4a: 1.8.1
       compact-encoding: 2.19.2
       hypercore: 11.30.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3)
-      hypercore-crypto: 3.7.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))(bare-url@2.4.3)
-      sodium-universal: 5.0.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))(bare-url@2.4.3)
+      hypercore-crypto: 3.7.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3)
+      sodium-universal: 5.0.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3)
     transitivePeerDependencies:
       - bare-abort-controller
       - bare-buffer
@@ -4047,7 +4053,7 @@ snapshots:
     dependencies:
       b4a: 1.8.1
       core-coupler: 2.0.0
-      protomux-wakeup: 2.9.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))(bare-url@2.4.3)
+      protomux-wakeup: 2.9.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3)
       ready-resource: 1.2.0(bare-abort-controller@1.1.2)
     transitivePeerDependencies:
       - bare-abort-controller
@@ -4105,6 +4111,14 @@ snapshots:
     optionalDependencies:
       bare-url: 2.4.3
 
+  bare-ansi-escapes@2.2.3:
+    dependencies:
+      bare-stream: 2.13.1
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-events
+      - react-native-b4a
+
   bare-ansi-escapes@2.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2)):
     dependencies:
       bare-stream: 2.13.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))
@@ -4112,6 +4126,15 @@ snapshots:
       bare-buffer: 3.6.0
     transitivePeerDependencies:
       - bare-abort-controller
+      - bare-events
+      - react-native-b4a
+
+  bare-assert@1.2.0:
+    dependencies:
+      bare-inspect: 3.1.4
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
       - bare-events
       - react-native-b4a
 
@@ -4231,6 +4254,16 @@ snapshots:
       - bare-buffer
       - bare-events
       - bare-url
+      - react-native-b4a
+
+  bare-inspect@3.1.4:
+    dependencies:
+      bare-ansi-escapes: 2.2.3
+      bare-type: 1.1.0
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
+      - bare-events
       - react-native-b4a
 
   bare-inspect@3.1.4(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2)):
@@ -4512,6 +4545,13 @@ snapshots:
       - bare-buffer
       - react-native-b4a
 
+  bare-stream@2.13.1:
+    dependencies:
+      streamx: 2.25.0(bare-abort-controller@1.1.2)
+      teex: 1.0.1(bare-abort-controller@1.1.2)
+    transitivePeerDependencies:
+      - react-native-b4a
+
   bare-stream@2.13.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2)):
     dependencies:
       streamx: 2.25.0(bare-abort-controller@1.1.2)
@@ -4785,6 +4825,24 @@ snapshots:
       hypercore-id-encoding: 1.3.0
       ready-resource: 1.2.0(bare-abort-controller@1.1.2)
       sodium-universal: 5.0.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))(bare-url@2.4.3)
+      which-runtime: 1.4.0
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
+      - bare-events
+      - bare-url
+      - react-native-b4a
+      - sodium-javascript
+
+  corestore@7.9.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3):
+    dependencies:
+      b4a: 1.8.1
+      hypercore: 11.30.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3)
+      hypercore-crypto: 3.7.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3)
+      hypercore-errors: 1.5.0
+      hypercore-id-encoding: 1.3.0
+      ready-resource: 1.2.0(bare-abort-controller@1.1.2)
+      sodium-universal: 5.0.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3)
       which-runtime: 1.4.0
     transitivePeerDependencies:
       - bare-abort-controller
@@ -5264,6 +5322,32 @@ snapshots:
       b4a: 1.8.1
       compact-encoding: 3.1.0
       sodium-universal: 5.0.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))(bare-url@2.4.3)
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
+      - bare-events
+      - bare-url
+      - react-native-b4a
+      - sodium-javascript
+
+  hypercore-crypto@3.7.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3):
+    dependencies:
+      b4a: 1.8.1
+      compact-encoding: 3.1.0
+      sodium-universal: 5.0.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3)
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
+      - bare-events
+      - bare-url
+      - react-native-b4a
+      - sodium-javascript
+
+  hypercore-crypto@3.7.0(bare-url@2.4.3):
+    dependencies:
+      b4a: 1.8.1
+      compact-encoding: 3.1.0
+      sodium-universal: 5.0.1(bare-url@2.4.3)
     transitivePeerDependencies:
       - bare-abort-controller
       - bare-buffer
@@ -5849,6 +5933,20 @@ snapshots:
       - react-native-b4a
       - sodium-javascript
 
+  protomux-wakeup@2.9.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3):
+    dependencies:
+      b4a: 1.8.1
+      hypercore-crypto: 3.7.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3)
+      hyperschema: 1.21.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)
+      protomux: 3.11.0
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
+      - bare-events
+      - bare-url
+      - react-native-b4a
+      - sodium-javascript
+
   protomux@3.11.0:
     dependencies:
       b4a: 1.8.1
@@ -6090,6 +6188,30 @@ snapshots:
       - bare-url
       - react-native-b4a
 
+  sodium-native@5.1.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3):
+    dependencies:
+      bare-assert: 1.2.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))
+      require-addon: 1.2.0(bare-url@2.4.3)
+      which-runtime: 1.4.0
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
+      - bare-events
+      - bare-url
+      - react-native-b4a
+
+  sodium-native@5.1.0(bare-url@2.4.3):
+    dependencies:
+      bare-assert: 1.2.0
+      require-addon: 1.2.0(bare-url@2.4.3)
+      which-runtime: 1.4.0
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
+      - bare-events
+      - bare-url
+      - react-native-b4a
+
   sodium-secretstream@1.2.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))(bare-url@2.4.3):
     dependencies:
       b4a: 1.8.1
@@ -6105,6 +6227,26 @@ snapshots:
   sodium-universal@5.0.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))(bare-url@2.4.3):
     dependencies:
       sodium-native: 5.1.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-events@2.8.3(bare-abort-controller@1.1.2))(bare-url@2.4.3)
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
+      - bare-events
+      - bare-url
+      - react-native-b4a
+
+  sodium-universal@5.0.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3):
+    dependencies:
+      sodium-native: 5.1.0(bare-abort-controller@1.1.2)(bare-buffer@3.6.0)(bare-url@2.4.3)
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
+      - bare-events
+      - bare-url
+      - react-native-b4a
+
+  sodium-universal@5.0.1(bare-url@2.4.3):
+    dependencies:
+      sodium-native: 5.1.0(bare-url@2.4.3)
     transitivePeerDependencies:
       - bare-abort-controller
       - bare-buffer
