@@ -233,13 +233,58 @@ Plan 1 was reviewed across five independent axes (spec compliance, shallow bug s
 
 Findings with confidence < 60 are documented in [Known limitations](#known-limitations).
 
+## Multi-peer mode (Plan 2)
+
+Vault now supports multiple peers connected through a shared Vault. Two laptops on the same network can:
+
+1. Laptop A: create a Vault → become admin
+2. Laptop A: issue an invite token (copy to clipboard, share out-of-band)
+3. Laptop B: paste the token → become member
+4. Both laptops: see each other's memories via cross-peer federated search
+
+The sync layer is multi-writer Autobee on top of Hypercore + Hyperbee, with Hyperswarm DHT for discovery. Invite tokens are Ed25519-signed and carry the admin's writer key + expiry. The roster gates all writes via a deterministic `apply()` function — only admitted peers can append to the synced state. New peers send a signed `MemberClaim` on first connect; the admin verifies, writes a `Member` record, and the roster propagates to everyone.
+
+### Running the multipeer demo
+
+On each laptop:
+
+```bash
+pnpm install
+pnpm dev                              # terminal 1 — sidecar
+pnpm --filter @vault/web dev          # terminal 2 — web UI
+```
+
+Open <http://127.0.0.1:5173/> on each laptop. The first peer creates a Vault; the second pastes the invite token. After ~30 seconds the peer chip in the header shows both peers. Capture a memory on one laptop; search for it on the other.
+
+The full walkthrough is in [docs/DEMO_PLAN_2.md](docs/DEMO_PLAN_2.md).
+
+### Known limitations (Plan 2)
+
+- **Hyperswarm DHT requires outbound UDP.** Corporate Wi-Fi and many hotel networks block this. A LAN-only fallback (mDNS or direct-connect by IP) is documented as Plan 4 work.
+- **Federated search leaks the query.** `search.probe` ships the plain-text query to admitted peers so each can run local retrieval. Content (snippets, hits) stays node-local — only the query crosses the wire. Documented in the Plan 2 spec as accepted Plan-2 risk; the Plan 3 consent gate narrows but does not eliminate it.
+- **Revocation is data-model only.** A `Revocation` kind is replicated and the `apply()` function refuses writes from revoked peers, but the UI does not yet expose a "revoke peer" action. Plan 3 surfaces it.
+- **No consent prompts.** Admitted peers see every memory matching their query. Per-request consent gating, blurred previews, audit log, and the admin pane are scoped to Plan 3.
+
+### Multipeer test
+
+The two-process integration test (`packages/sync/tests/two-peer.test.ts`) runs in CI using an in-memory duplex pair — deterministic proof that the protocol is sound.
+
+The real-DHT test is dev-machine only (it needs outbound UDP, real model downloads, and 3+ minutes):
+
+```bash
+pnpm e2e:multipeer
+```
+
+This spawns two sidecar child processes on different ports + `VAULT_ROOT`s, joins a real Hyperswarm topic, and verifies peer admission via the `peer.list` reply.
+
 ## Submission deliverables
 
 - **Source code** — this repo.
 - **Repository access** — granted to `@elchiapp` (pre-submission).
 - **README** — this file.
 - **Architecture notes** — [docs/superpowers/specs/2026-05-25-vault-design.md](docs/superpowers/specs/2026-05-25-vault-design.md).
-- **Implementation plan** — [docs/superpowers/plans/2026-05-26-vault-1-foundation.md](docs/superpowers/plans/2026-05-26-vault-1-foundation.md).
+- **Implementation plans** — Plan 1: [docs/superpowers/plans/2026-05-26-vault-1-foundation.md](docs/superpowers/plans/2026-05-26-vault-1-foundation.md). Plan 2: [docs/superpowers/plans/2026-05-26-vault-2-multi-peer-sync.md](docs/superpowers/plans/2026-05-26-vault-2-multi-peer-sync.md).
+- **Multi-peer demo script** — [docs/DEMO_PLAN_2.md](docs/DEMO_PLAN_2.md).
 - **QVAC SDK spike notes** — [docs/superpowers/notes/2026-05-26-qvac-spike.md](docs/superpowers/notes/2026-05-26-qvac-spike.md).
 - **Model/engine tradeoffs** — [MODEL_TRADEOFFS.md](MODEL_TRADEOFFS.md).
 - **Threat model + trust posture** — [THREAT_MODEL.md](THREAT_MODEL.md).
