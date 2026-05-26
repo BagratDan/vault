@@ -310,15 +310,49 @@ Spawns two sidecars, walks the entire flow (capture → search → request → a
 - **No per-matter sub-vaults** — single vault per peer; matter-scoping deferred to v3.
 - **Per-peer audit aggregation by admin** — same deferred line as cross-peer verification.
 
+## Folder-organized DAM (Plan 4)
+
+Plans 1–3 built the consent-gated memory model. Plan 4 turns it into a real DAM by letting you point Vault at folders on your disk:
+
+- **Add folder** from the home screen — paste an absolute path (under `$HOME`), pick a display name, set visibility. Vault walks the directory and indexes every supported file.
+- **Supported file types**: PDF (via `pdfjs-dist`), DOCX (via `mammoth`), `.txt` / `.md`, and audio (`.mp3` / `.wav` / `.m4a` / `.flac` / `.ogg`) through the existing Parakeet transcription pipeline. Each file's text is extracted, embedded, and indexed locally; the raw bytes never leave your machine until a consent grant approves `scope: "file"`.
+- **Public** folders are searchable by admitted peers (still gated by per-memory consent from Plan 3 — blurred preview by default, real content only after the owner approves a `consent.request`).
+- **Private** folders are local-only. Two independent gates protect them: a **storage gate** (private memories are written to an owner-local Hyperbee under `${VAULT_ROOT}/local/`, never to the synced Autobee) and a **probe-time gate** (the peer-side `handleSearchProbe` admits only known-public folders via a positive allowlist).
+- Inside a folder, **Capture / Ask / Library are folder-scoped**. The home screen's "Ask (across all folders)" runs an unscoped federated search. Typed captures land in a default per-peer **Captures** folder.
+- **Re-scan** (manual) picks up new/changed/deleted files; **Make public/private** toggles visibility (applies to future ingests); **Delete** removes the folder from the vault without touching the files on disk.
+
+### Running the folder demo
+
+The Plan 2 setup applies (`pnpm install && pnpm dev` + `pnpm --filter @vault/web dev`). Then follow [docs/DEMO_PLAN_4.md](docs/DEMO_PLAN_4.md) — a ~90-second walkthrough that adds a folder of text files, watches the ingest progress, and searches inside the folder.
+
+### Folder E2E test
+
+A browser-driven Playwright spec exercises the full add-folder → ingest → search-inside flow. Excluded from the default `vitest` runner; runs via:
+
+```bash
+pnpm --filter @vault/e2e test:playwright
+```
+
+### Known limitations (Plan 4)
+
+- **Manual re-scan only** — no live filesystem watcher (no chokidar / fs.watch).
+- **No OCR** — image-only PDFs without a text layer produce empty bodies and are skipped.
+- **Public/private only** — no per-peer folder ACL (a folder is visible to all admitted peers or to no one).
+- **Flat folder UI** — a chosen directory is walked recursively and collapsed into one Vault folder; no nested folder navigation.
+- **Visibility toggle is not retroactive** — flipping public↔private affects future ingests only; re-scan to reroute existing memories.
+- **Path entry by paste** — the browser File System Access API is Chromium-only and gated, so you paste an absolute path rather than using a native picker. A desktop wrapper (Electron/Tauri) would add a native dir picker in a future version.
+- **No in-app file preview** — once a peer grants `scope: "file"`, the bytes flow as base64 and download; a built-in PDF/image viewer is deferred.
+
 ## Submission deliverables
 
 - **Source code** — this repo.
 - **Repository access** — granted to `@elchiapp` (pre-submission).
 - **README** — this file.
 - **Architecture notes** — [docs/superpowers/specs/2026-05-25-vault-design.md](docs/superpowers/specs/2026-05-25-vault-design.md).
-- **Implementation plans** — Plan 1: [docs/superpowers/plans/2026-05-26-vault-1-foundation.md](docs/superpowers/plans/2026-05-26-vault-1-foundation.md). Plan 2: [docs/superpowers/plans/2026-05-26-vault-2-multi-peer-sync.md](docs/superpowers/plans/2026-05-26-vault-2-multi-peer-sync.md). Plan 3: [docs/superpowers/plans/2026-05-26-vault-3-consent-audit-admin.md](docs/superpowers/plans/2026-05-26-vault-3-consent-audit-admin.md).
+- **Implementation plans** — Plan 1: [docs/superpowers/plans/2026-05-26-vault-1-foundation.md](docs/superpowers/plans/2026-05-26-vault-1-foundation.md). Plan 2: [docs/superpowers/plans/2026-05-26-vault-2-multi-peer-sync.md](docs/superpowers/plans/2026-05-26-vault-2-multi-peer-sync.md). Plan 3: [docs/superpowers/plans/2026-05-26-vault-3-consent-audit-admin.md](docs/superpowers/plans/2026-05-26-vault-3-consent-audit-admin.md). Plan 4: [docs/superpowers/plans/2026-05-26-vault-4-folders-dam.md](docs/superpowers/plans/2026-05-26-vault-4-folders-dam.md).
 - **Multi-peer demo script** — [docs/DEMO_PLAN_2.md](docs/DEMO_PLAN_2.md).
 - **Consent demo script** — [docs/DEMO_PLAN_3.md](docs/DEMO_PLAN_3.md).
+- **Folder DAM demo script** — [docs/DEMO_PLAN_4.md](docs/DEMO_PLAN_4.md).
 - **QVAC SDK spike notes** — [docs/superpowers/notes/2026-05-26-qvac-spike.md](docs/superpowers/notes/2026-05-26-qvac-spike.md).
 - **Model/engine tradeoffs** — [MODEL_TRADEOFFS.md](MODEL_TRADEOFFS.md).
 - **Threat model + trust posture** — [THREAT_MODEL.md](THREAT_MODEL.md).
