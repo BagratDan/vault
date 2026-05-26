@@ -4,3 +4,4 @@ export * from "./indexes.js";
 export * from "./sign.js";
 export * from "./roster.js";
 export * from "./apply.js";
+export * from "./swarm.js";
