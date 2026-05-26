@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { baseRecordShape } from "./base.js";
+import { baseRecordShape, isoShape } from "./base.js";
 import { transcriptShape } from "./transcript.js";
 
 const textVariant = baseRecordShape.extend({
@@ -15,9 +15,11 @@ const audioVariant = baseRecordShape.extend({
 
 const fileVariant = baseRecordShape.extend({
   kind: z.literal("file"),
-  path: z.string(),
-  mime: z.string(),
+  path: z.string().min(1),
   hash: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+  size: z.number().int().nonnegative(),
+  mime: z.string().min(1),
+  lastModified: isoShape,
 });
 
 export const sourceRecordShape = z.discriminatedUnion("kind", [

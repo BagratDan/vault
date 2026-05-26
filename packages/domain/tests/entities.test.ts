@@ -131,6 +131,8 @@ describe("entity schemas", () => {
       path: "/vault/files/x.pdf",
       mime: "application/pdf",
       hash: "sha256:" + "a".repeat(64),
+      size: 1024,
+      lastModified: "2026-05-26T10:00:00.000Z",
     };
     expect(sourceRecordShape.safeParse(s).success).toBe(true);
   });
