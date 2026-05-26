@@ -1,5 +1,5 @@
 import { newUlid } from "@vault/domain";
-import { ensureEmbedModel, type ModelPool } from "@vault/ai";
+import { blurPreview, ensureEmbedModel, type ModelPool } from "@vault/ai";
 import {
   search,
   type Workspace,
@@ -91,6 +91,9 @@ export async function runSearch(
  * The peer-side handler for incoming search.probe RPCs. Runs ragSearch
  * against the LOCAL workspace (no further fan-out — that would loop).
  * Stamps ownerPeerId so the requester knows which peer hits came from.
+ *
+ * Plan 3: snippets are blurred at the RPC boundary. Real content only
+ * crosses the wire after a successful consent.request → consent.response.
  */
 export async function handleSearchProbe(
   deps: { pool: ModelPool; workspace: Workspace; selfPeerId: string },
@@ -104,7 +107,8 @@ export async function handleSearchProbe(
     },
     { query: probe.query, k: probe.k }
   );
-  return { v: 1, requestId: probe.requestId, hits: localHits };
+  const blurred = localHits.map((h) => ({ ...h, snippet: blurPreview(h.snippet) }));
+  return { v: 1, requestId: probe.requestId, hits: blurred };
 }
 
 async function searchLocal(
