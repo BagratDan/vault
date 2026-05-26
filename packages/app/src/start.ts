@@ -49,7 +49,6 @@ export async function startVault(): Promise<VaultHandle> {
   const pool = new ModelPool({
     memoryPressureFloor: 0.6,
     onMemoryPressure: (info) => {
-      // eslint-disable-next-line no-console
       console.warn(
         `[vault] memory pressure: rss=${info.rss} total=${info.total}`
       );
@@ -234,13 +233,11 @@ export async function startVault(): Promise<VaultHandle> {
 if (import.meta.url === `file://${process.argv[1]}`) {
   startVault()
     .then(({ port, peerId }) => {
-      // eslint-disable-next-line no-console
       console.log(
         `[vault] sidecar listening on 127.0.0.1:${port} (peerId=${peerId})`
       );
     })
     .catch((err) => {
-      // eslint-disable-next-line no-console
       console.error("[vault] failed to start:", err);
       process.exit(1);
     });
