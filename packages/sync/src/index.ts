@@ -7,3 +7,4 @@ export * from "./apply.js";
 export * from "./swarm.js";
 export * from "./swarm-transport.js";
 export * from "./audit.js";
+export * from "./consent-protocol.js";
