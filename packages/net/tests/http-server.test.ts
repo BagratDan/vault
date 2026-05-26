@@ -82,4 +82,17 @@ describe("createSidecarServer", () => {
     });
     expect(result).toBe("error");
   });
+
+  it("WS accepts Origin: http://localhost:5173 (browser default for Vite dev)", async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${server.port}/ws?token=${TOKEN}`, {
+      headers: { origin: "http://localhost:5173" },
+    });
+    const result = await new Promise<"open" | "error">((res) => {
+      ws.once("open", () => res("open"));
+      ws.once("error", () => res("error"));
+      ws.once("unexpected-response", () => res("error"));
+    });
+    expect(result).toBe("open");
+    ws.close();
+  });
 });

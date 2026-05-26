@@ -46,9 +46,16 @@ export async function createSidecarServer(
     );
   }
 
+  // Browsers use whatever hostname is in the address bar for the Origin header,
+  // so we accept both 127.0.0.1 and localhost variants. The loopback-only bind
+  // (enforced above) is the real isolation; Origin is a defense-in-depth check
+  // against cross-origin browser tabs.
   const allowedOriginsHttp = opts.allowedOrigins ?? [
     `http://${opts.host}:${opts.port}`,
     `http://127.0.0.1:5173`,
+    `http://localhost:5173`,
+    `http://127.0.0.1:${opts.port}`,
+    `http://localhost:${opts.port}`,
   ];
 
   const httpServer = http.createServer((req, res) => {
