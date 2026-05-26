@@ -74,6 +74,9 @@ importers:
       '@vault/domain':
         specifier: workspace:*
         version: link:../domain
+      '@vault/ingest':
+        specifier: workspace:*
+        version: link:../ingest
       '@vault/net':
         specifier: workspace:*
         version: link:../net

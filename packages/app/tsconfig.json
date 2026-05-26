@@ -10,6 +10,7 @@
     { "path": "../net" },
     { "path": "../domain" },
     { "path": "../ai" },
+    { "path": "../ingest" },
     { "path": "../retrieval" },
     { "path": "../sync" }
   ]
