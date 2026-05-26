@@ -1,6 +1,7 @@
 import Hyperswarm from "hyperswarm";
 import b4a from "b4a";
 import { wireRpc, type DuplexLike, type RpcHandler, type RpcSession } from "./swarm.js";
+import type { ConsentRequest, ConsentResponse } from "./consent-protocol.js";
 
 /**
  * MemberClaim — sent over the Hyperswarm RPC channel on first peer
@@ -24,6 +25,10 @@ export interface SwarmEvents {
   /** Called when a peer sends us a member.claim RPC. Admins use this
    *  to verify + admit; non-admin peers can ignore (no-op). */
   onClaim?: (peerId: string, claim: MemberClaim) => Promise<void> | void;
+  /** Owner side: a peer requests access to one of our memories. */
+  onConsentRequest?: (peerId: string, req: ConsentRequest) => Promise<void> | void;
+  /** Requester side: the owner has decided (approve / deny / expire). */
+  onConsentResponse?: (peerId: string, res: ConsentResponse) => Promise<void> | void;
 }
 
 /**
@@ -78,6 +83,14 @@ export class SwarmTransport {
           await this.events.onClaim?.(peerPk, params as MemberClaim);
           return { ok: true };
         }
+        if (method === "consent.request") {
+          await this.events.onConsentRequest?.(peerPk, params as ConsentRequest);
+          return { ok: true };
+        }
+        if (method === "consent.response") {
+          await this.events.onConsentResponse?.(peerPk, params as ConsentResponse);
+          return { ok: true };
+        }
         return this.handler(method, params);
       });
       this.connections.set(peerPk, session);
@@ -103,6 +116,21 @@ export class SwarmTransport {
     const session = this.connections.get(peerId);
     if (!session) return;
     await session.request("member.claim", claim);
+  }
+
+  /**
+   * Push a ConsentRequest or ConsentResponse to a peer. Both directions
+   * are one-way — the reply path surfaces via onConsentResponse, never
+   * via this method's promise. Throws if the peer is not connected so
+   * the caller can short-circuit with `owner-offline` audit.
+   */
+  async sendConsent(
+    peerId: string,
+    payload: ConsentRequest | ConsentResponse
+  ): Promise<void> {
+    const session = this.connections.get(peerId);
+    if (!session) throw new Error(`no rpc session for peer ${peerId}`);
+    await session.request(payload.method, payload);
   }
 
   async broadcast(
