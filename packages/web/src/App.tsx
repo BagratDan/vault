@@ -71,7 +71,8 @@ export function App() {
         client.send({ kind: "vault.status" });
         setWs(client);
         setConnState("ready");
-      } catch {
+      } catch (err) {
+        console.error("[vault] sidecar handshake failed:", err);
         if (!cancelled) setConnState("error");
       }
     })();
