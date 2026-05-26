@@ -22,6 +22,12 @@ export const vaultStateShape = z.object({
   role: z.enum(["admin", "member"]),
   selfPeerId: z.string().regex(HEX_64),
   createdAt: z.string().regex(ISO),
+  /**
+   * This peer's "Captures" folder ID — the implicit destination for typed
+   * captures. Optional so vault-state.json files written before Plan 4 still
+   * parse; activateVault backfills it on next boot.
+   */
+  capturesFolderId: z.string().regex(ULID).optional(),
 });
 
 export type VaultState = z.infer<typeof vaultStateShape>;

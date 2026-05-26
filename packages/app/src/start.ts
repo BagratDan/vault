@@ -4,6 +4,7 @@ import { createSidecarServer } from "@vault/net";
 import { Provider, ModelPool } from "@vault/ai";
 import {
   AuditLog,
+  FolderLocal,
   Indexes,
   RateLimiter,
   Repo,
@@ -14,12 +15,21 @@ import {
   type MemberClaim,
 } from "@vault/sync";
 import { Workspace } from "@vault/retrieval";
-import { newUlid, type ConsentEvent } from "@vault/domain";
+import {
+  newCapturesFolderId,
+  newUlid,
+  type ConsentEvent,
+  type Folder,
+} from "@vault/domain";
 import b4a from "b4a";
 import { loadConfig } from "./config.js";
 import { VaultFs } from "./vault-fs.js";
 import { loadOrCreateIdentity } from "./identity.js";
-import { readVaultState, type VaultState } from "./vault-state.js";
+import {
+  readVaultState,
+  writeVaultState,
+  type VaultState,
+} from "./vault-state.js";
 import { makeRouter, type BridgeDeps } from "./ws-bridge.js";
 import { handleSearchProbe } from "./routes/search.js";
 import type { VaultRuntime } from "./routes/vault.js";
@@ -38,6 +48,7 @@ export async function startVault(): Promise<VaultHandle> {
   await fsApi.ensureDir("data");
   await fsApi.ensureDir("audio");
   await fsApi.ensureDir("audit");
+  await fsApi.ensureDir("local");
 
   const identity = await loadOrCreateIdentity(fsApi);
 
@@ -109,6 +120,39 @@ export async function startVault(): Promise<VaultHandle> {
   };
   let broadcastToClients: (msg: unknown) => void = () => undefined;
 
+  // Ensure this peer's "Captures" folder exists in FolderLocal, generating +
+  // persisting its ID into VaultState on first activation. Nested so it closes
+  // over fsApi. Captures is `private`, so no public subset goes to Autobee.
+  async function ensureCapturesFolder(
+    fl: FolderLocal,
+    state: VaultState,
+    ownerPeerId: string
+  ): Promise<void> {
+    if (!state.capturesFolderId) {
+      state.capturesFolderId = newCapturesFolderId();
+      // Keep runtime.state in sync regardless of object identity so the
+      // ws-bridge capture cases read the freshly-minted ID.
+      if (runtime.state) runtime.state.capturesFolderId = state.capturesFolderId;
+      await writeVaultState(fsApi, state);
+    }
+    const existing = await fl.getFolder(state.capturesFolderId);
+    if (existing) return;
+    const now = new Date().toISOString();
+    const f: Folder = {
+      id: state.capturesFolderId,
+      createdAt: now,
+      updatedAt: now,
+      ownerPeerId,
+      provenance: { kind: "user" },
+      kind: "folder",
+      path: "(captures)",
+      displayName: "Captures",
+      visibility: "private",
+    };
+    await fl.putFolder(f);
+    // Captures is private — no public subset written to autobee.
+  }
+
   async function activateVault(state: VaultState): Promise<void> {
     if (!audit) {
       const auditInst = new AuditLog(fsApi.path("audit"));
@@ -121,6 +165,12 @@ export async function startVault(): Promise<VaultHandle> {
           broadcastToClients({ kind: "consent.expired", consentRequestId });
         },
       });
+    }
+    if (!runtime.folderLocal) {
+      const fl = new FolderLocal(fsApi.path("local"));
+      await fl.ready();
+      runtime.folderLocal = fl;
+      await ensureCapturesFolder(fl, state, identity.peerId);
     }
 
     const writeAudit = async (
@@ -398,6 +448,7 @@ export async function startVault(): Promise<VaultHandle> {
     close: async () => {
       await server.close();
       if (runtime.swarm) await runtime.swarm.close();
+      if (runtime.folderLocal) await runtime.folderLocal.close();
       if (runtime.store) await runtime.store.close();
       consentState?.dispose();
       if (audit) await audit.close();

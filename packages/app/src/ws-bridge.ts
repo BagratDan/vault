@@ -200,6 +200,9 @@ async function routeMessage(
             workspace: deps.workspace,
             fs: deps.fs,
             ownerPeerId: deps.ownerPeerId,
+            capturesFolderId:
+              deps.runtime.state?.capturesFolderId ??
+              "01J0CAPTVRES000000000000AA",
           },
           { text: msg.text, tags: msg.tags }
         );
@@ -221,6 +224,9 @@ async function routeMessage(
             workspace: deps.workspace,
             fs: deps.fs,
             ownerPeerId: deps.ownerPeerId,
+            capturesFolderId:
+              deps.runtime.state?.capturesFolderId ??
+              "01J0CAPTVRES000000000000AA",
           },
           { audio, tags: msg.tags }
         );

@@ -22,6 +22,8 @@ export interface CaptureDeps {
   workspace: Workspace;
   fs: VaultFs;
   ownerPeerId: string;
+  /** This peer's "Captures" folder ID — destination for typed captures. */
+  capturesFolderId: string;
 }
 
 export interface CaptureTextInput {
@@ -33,9 +35,6 @@ export interface CaptureResult {
   memoryId: string;
   duplicateOf?: string;
 }
-
-// Placeholder; Task 18 plumbs the real Captures folder ID from VaultState.
-const CAPTURES_PLACEHOLDER = "01J0CAPTVRES000000000000AA";
 
 export async function captureText(
   deps: CaptureDeps,
@@ -59,7 +58,7 @@ export async function captureText(
     sourceRecordId: asUlid(src.id),
     text: input.text,
     ownerPeerId: deps.ownerPeerId,
-    folderId: CAPTURES_PLACEHOLDER,
+    folderId: deps.capturesFolderId,
   });
 
   // 3. Embed the memory body. The same vector is reused for dedup-search
