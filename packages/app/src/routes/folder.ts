@@ -164,6 +164,19 @@ async function runIngest(deps: FolderRoutesDeps, folder: Folder): Promise<void> 
         folderId: folder.id,
       };
       await deps.getRepo().putMemoryByVisibility(memory, folder.visibility);
+      // Public memories live in autobee and must be discoverable via the
+      // folder index (listMemoriesInFolder is index-exclusive for public
+      // hits) plus the meta side-index. Private memories live in FolderLocal
+      // and are read separately, so they are NOT indexed here.
+      if (folder.visibility === "public") {
+        await deps.getIndexes().indexFolderMembership(folder.id, memory.id);
+        await deps.getIndexes().indexMeta(memory.id, {
+          tags: memory.tags,
+          ownerPeerId: memory.ownerPeerId,
+          createdAt: memory.createdAt,
+          personIds: [],
+        });
+      }
       // Chunk + embed so large files are searchable (whole-body embed
       // overflowed EmbeddingGemma's 1024-token limit and silently failed).
       await chunkAndEmbed(
