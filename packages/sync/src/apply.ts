@@ -25,7 +25,8 @@ export interface Op {
     | "external-ref"
     | "relationship"
     | "source-record"
-    | "index";
+    | "index"
+    | "consentRequest";
   key: string;
   value: Record<string, unknown>;
 }
@@ -126,6 +127,19 @@ export function makeApply(deps: ApplyDeps) {
         // record impersonating another peer's ownership.
         const claimedOwner = dataOp.value["ownerPeerId"];
         if (claimedOwner !== writerPeerId) continue;
+        const sig = dataOp.value["sig"] as string | undefined;
+        if (typeof sig !== "string") continue;
+        const ok = verifyCanonical(stripSig(dataOp.value), sig, node.from.key);
+        if (!ok) continue;
+      }
+
+      if (dataOp.kind === "consentRequest") {
+        // A consent request is self-signed by the requester's writer key —
+        // bind the claimed requester to the actual writer so a member can't
+        // forge a request attributed to another peer. (The roster gate above
+        // already drops non-members / revoked writers.)
+        const claimedRequester = dataOp.value["requesterPeerId"];
+        if (claimedRequester !== writerPeerId) continue;
         const sig = dataOp.value["sig"] as string | undefined;
         if (typeof sig !== "string") continue;
         const ok = verifyCanonical(stripSig(dataOp.value), sig, node.from.key);
