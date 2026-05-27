@@ -14,6 +14,7 @@ import {
 import { Repo, Indexes } from "@vault/sync";
 import { Workspace, search } from "@vault/retrieval";
 import { VaultFs } from "../vault-fs.js";
+import { chunkAndEmbed } from "../chunk-embed.js";
 
 export interface CaptureDeps {
   pool: ModelPool;
@@ -61,11 +62,20 @@ export async function captureText(
     folderId: deps.capturesFolderId,
   });
 
-  // 3. Embed the memory body. The same vector is reused for dedup-search
-  //    and for the workspace ingest below, so we only run the embedding
-  //    model once per capture. Loads the model on first call.
+  // 3. Load the embedding model. Used for the dedup query below; the
+  //    workspace indexing happens via chunkAndEmbed (step 7), which embeds
+  //    each chunk under the model's token limit. A best-effort single-shot
+  //    embed of the whole body powers the dedup check — if the body is too
+  //    long for one batch it throws, so we skip dedup (treat as new) rather
+  //    than fail the capture. Chunked indexing in step 7 still makes it
+  //    findable.
   const embedModelId = await ensureEmbedModel(deps.pool);
-  const vector = await embedText(deps.pool, ext.memory.body);
+  let dedupVector: number[] | null = null;
+  try {
+    dedupVector = await embedText(deps.pool, ext.memory.body);
+  } catch {
+    dedupVector = null;
+  }
 
   // 4. Dedup check (spec §9.3 step 6). Query @qvac/rag for the top-1
   //    existing memory matching the new body; if its similarity score is
@@ -74,6 +84,9 @@ export async function captureText(
   const DEDUP_THRESHOLD = 0.92;
   let duplicateOf: string | undefined;
   try {
+    // Skip dedup if the body couldn't be embedded in one shot (too long);
+    // a too-long body is treated as new rather than failing the capture.
+    if (!dedupVector) throw new Error("dedup embed unavailable");
     const hits = await search({
       modelId: embedModelId,
       workspace: deps.workspace.getName(),
@@ -125,18 +138,12 @@ export async function captureText(
     ext.people.map((p) => p.id)
   );
 
-  // 7. Save the pre-computed embedding into the @qvac/rag workspace.
-  await deps.workspace.ingest({
-    memoryId: asUlid(ext.memory.id),
-    body: ext.memory.body,
-    tags: ext.memory.tags,
-    embedding: vector,
-    embeddingModelId: embedModelId,
-    metadata: {
-      ownerPeerId: deps.ownerPeerId,
-      createdAt: ext.memory.createdAt,
-    },
-  });
+  // 7. Chunk + embed so long captures are searchable (a single-shot embed
+  //    of the whole body overflows EmbeddingGemma's 1024-token limit).
+  await chunkAndEmbed(
+    { pool: deps.pool, workspace: deps.workspace, ownerPeerId: deps.ownerPeerId },
+    ext.memory
+  );
 
   return { memoryId: ext.memory.id };
 }
