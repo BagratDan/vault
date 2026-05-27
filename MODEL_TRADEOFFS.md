@@ -4,26 +4,36 @@ This document covers the substantive AI and infrastructure choices made in Plan 
 
 Companion docs: [README.md](README.md) (setup + stack summary), [docs/superpowers/specs/2026-05-25-vault-design.md](docs/superpowers/specs/2026-05-25-vault-design.md) (full architectural spec), [docs/superpowers/notes/2026-05-26-qvac-spike.md](docs/superpowers/notes/2026-05-26-qvac-spike.md) (spike that surfaced QVAC's actual API).
 
-## LLM — Llama 3.2 1B Instruct Q4_0
+## LLM — Qwen3 4B Instruct Q4_K_M (switched from Llama 3.2 1B)
 
-**Chosen:** `LLAMA_3_2_1B_INST_Q4_0` (single-file constant; ~700 MB on disk).
+**Chosen:** `QWEN3_4B_INST_Q4_K_M` (single-file constant; ~2.5 GB on disk, ~3.2 GB resident with the 4096-token KV cache).
 
-**Why:**
+**History:** Plan 1 originally shipped `LLAMA_3_2_1B_INST_Q4_0` (~700 MB) for its small footprint. In testing, the 1B reasoned too weakly for the Ask flow — it rambled on summaries and could not answer count/metadata questions (e.g. "how many files are in the folder") *even when the count was injected into its prompt*. After fixing a separate LLM context-overflow bug (raising `ctx_size` 1024→4096 + budgeting the prompt), the remaining failure was purely model reasoning quality, so we upgraded the model.
 
-- Fits in our 8–16 GB RAM budget with room for STT and embed to co-reside.
-- Quantization (Q4_0) preserves enough fidelity for our extraction prompt (structured JSON output) and answer generation (snippet-grounded short prose).
-- Tether's QVAC v0.11.0 registry pins it as a first-class single-file constant — meaning load is one `loadModel` call, not the multi-file shard variant.
-- Open-weights via Unsloth's repacked GGUF; Tether ships the registry pointer.
+**Why Qwen3 4B:**
 
-**Alternatives considered:**
+- The QVAC v0.11.0 registry ships a fixed catalog (we can't pull arbitrary HuggingFace models). Among the general-purpose instruct LLMs that fit a 16 GB machine, Qwen3 4B is the quality sweet spot.
+- Materially stronger instruction-following and reasoning than the 1B — answers count questions correctly, summarizes coherently, respects the "cite [1]/[2]" format.
+- Single-file constant → one `loadModel` call (not the `_SHARD`/`_TENSORS` multi-file variants).
+- Qwen3 supports a `<think>…</think>` reasoning mode; the QVAC completion normalizer **strips those blocks by default** (`captureThinking: false`), so Vault needs no extra code to keep answers clean.
+- `ctx_size: 4096` (set on the pool handle) is model-agnostic and carries over unchanged. Embeddings are independent of the LLM, so the switch needs **no re-index**.
 
-- `LLAMA_TOOL_CALLING_1B_INST_Q4_K` — the tool-calling variant. Slightly larger; we don't actually use tool-calling in Plan 1 (the extraction prompt asks the model to emit a JSON object directly, not call tools). Not worth the size.
-- `QWEN3_4B_Q4_K_M` — better quality but 4× the size; pushes us over the spec's 8 GB target on smaller machines.
-- `LLAMA_3_2_1B_INST_Q4_0_SHARD` — multi-file variant. Same model, more orchestration overhead at load time. No win for our use case.
-- `BITNET_1B_INST_TQ2_0` — newer / smaller / faster but the extraction-quality risk on structured JSON output was unverified within the take-home window. The dedup pipeline + low-confidence fallback would mitigate hallucinations, but the spec's "LLM Robustness" requirement is better served by a known-good model.
-- `GPT_OSS_120B_INST_*` — exists in the registry but absurdly out of budget for consumer hardware.
+**Candidate comparison (registry LLMs viable on a 16 GB Apple M4):**
 
-**Risk we accepted:** 1 B parameters is small. Extraction failures are expected on noisy input; the Zod-validated retry + confidence=0.1 raw-text fallback in [`packages/ai/src/extract.ts`](packages/ai/src/extract.ts) is the mitigation. Tested with 3 unit cases covering well-formed output, schema-failure-then-retry-succeeds, and schema-failure-twice-fallback-to-raw.
+| Registry constant | Weights (Q4) | + KV @4096 | Reasoning | ~tok/s (M4) |
+|---|---|---|---|---|
+| `LLAMA_3_2_1B_INST_Q4_0` (was) | ~0.8 GB | ~1.1 GB | weak | 40–60 |
+| `QWEN3_1_7B_INST_Q4` | ~1.2 GB | ~1.6 GB | good | 30–45 |
+| **`QWEN3_4B_INST_Q4_K_M` (chosen)** | ~2.5 GB | ~3.2 GB | strong (≈GPT-3.5) | 15–25 |
+| `GEMMA_4B_IT_Q4_1` | ~2.8 GB | ~3.6 GB | strong, more verbose | 15–22 |
+| `QWEN3_8B_INST_Q4_K_M` | ~5 GB | ~6.5 GB | strongest | 8–14 |
+| `GPT_OSS_20B_INST_Q4_K_M` | ~12 GB | — | excellent | too big for 16 GB |
+
+Size figures are standard GGUF quant footprints (the registry carries no inline size metadata); tok/s are Apple M4 (10-core, unified memory) estimates. The `ModelPool` "one large model resident" rule means the LLM co-resides only with the small embed model (~0.3 GB) — TTS is evicted when the LLM loads — so peak Ask memory stays bounded (~3.5 GB) within 16 GB alongside macOS.
+
+**Alternatives considered:** Gemma 4B IT (comparable quality but more verbose — worse for terse count answers); Qwen3 8B (stronger but slower with less headroom on 16 GB); Qwen3 1.7B (lighter, smaller quality gain). `LLAMA_TOOL_CALLING_1B`, `BITNET_*`, and the `GPT_OSS` family were ruled out earlier (tool-calling unused, structured-output risk, out of budget respectively).
+
+**Risk we accepted:** ~2.5 GB first-load download and slower generation (~15–25 vs ~40–60 tok/s) — barely noticeable for short grounded answers, a brief wait for long summaries. Higher resident memory (~3.2 GB vs ~1.1 GB) is comfortable on 16 GB but could trip `onMemoryPressure` on a machine also running heavy apps. Rollback is a one-line revert of `VAULT_MODELS.llm` (back to `LLAMA_3_2_1B_INST_Q4_0`, or down to `QWEN3_1_7B_INST_Q4`). The extraction pipeline ([`packages/ai/src/extract.ts`](packages/ai/src/extract.ts)) shares this LLM, so its Zod-validated retry + confidence=0.1 raw-text fallback still applies — and benefits from the stronger model.
 
 ## STT — Parakeet TDT INT8
 

@@ -23,7 +23,7 @@ The full v1 spec also describes a per-firm Vault with signed-invite membership, 
 - **Node.js 22.17+** (the `engines` field in `package.json` enforces this; `.nvmrc` pins `22.17.0`).
 - **pnpm 9.12+** (`corepack enable && corepack prepare pnpm@9.12.0 --activate`, or install directly).
 - **Apple Silicon or NVIDIA consumer GPU** — `@qvac/sdk` v0.11.0 ships native bindings for these targets. The build was developed on Apple Silicon.
-- **~3.5 GB free disk** for the `@qvac/sdk` transitive native binaries (llama.cpp, whisper.cpp, ONNX runtimes via the `bare-*` Holepunch ecosystem). Model files download on first inference: roughly 700 MB for Llama 3.2 1B Q4_0 + 150 MB for EmbeddingGemma + ~75 MB for the Parakeet TDT INT8 quad + ~80 MB for Chatterbox Q4F16.
+- **~5.5 GB free disk** for the `@qvac/sdk` transitive native binaries (llama.cpp, whisper.cpp, ONNX runtimes via the `bare-*` Holepunch ecosystem) plus model files. Models download on first inference: ~2.5 GB for Qwen3 4B Instruct Q4_K_M (the Ask LLM) + 150 MB for EmbeddingGemma + ~75 MB for the Parakeet TDT INT8 quad + ~80 MB for Chatterbox Q4F16.
 
 ### Install
 
@@ -132,8 +132,9 @@ Major technology choices and why each was picked. Detailed model/engine tradeoff
 - `@qvac/sdk` v0.11.0 — sole AI dependency.
 - Provider lifecycle managed by `@vault/ai/src/provider.ts` (idempotent `startQVACProvider` / `stopQVACProvider`).
 - `ModelPool` enforces the "at most one large model resident" discipline. STT and embed are small enough to co-reside; LLM and TTS evict each other on load.
+- **Ask LLM is Qwen3 4B** (`QWEN3_4B_INST_Q4_K_M`), chosen over Llama 3.2 1B for materially stronger reasoning — the 1B rambled on summaries and couldn't answer count questions even with the folder count in its prompt. Qwen3 4B is the QVAC registry's quality sweet spot for a 16 GB machine: ~2.5 GB weights (~3.2 GB resident with the 4096-token KV cache), ~15–25 tok/s on an Apple M4. The SDK strips Qwen3's `<think>` reasoning blocks by default, so answers are clean. See [MODEL_TRADEOFFS.md](MODEL_TRADEOFFS.md).
 - **Ask prompt budgeting.** The LLM loads with a 4096-token context (`modelConfig: { ctx_size }` — QVAC defaults to 1024, which overflows once retrieved chunks are large). `buildAnswerContext` trims the assembled prompt (folder context + top snippets + question) to a ~3000-token budget so it can never overflow, regardless of how many chunks search returns. Per-folder file counts are injected into the context so "how many files…" style questions can be answered inline (semantic retrieval alone can't count files).
-- Model registry constants pinned in `@vault/ai/src/models.ts`. Plan 1 ships Llama 3.2 1B Q4_0 / EmbeddingGemma 300M Q4_0 / Chatterbox EN-ES Q4F16 / Parakeet TDT INT8 (encoder + decoder + preprocessor + vocab).
+- Model registry constants pinned in `@vault/ai/src/models.ts`: Qwen3 4B Instruct Q4_K_M (Ask LLM) / EmbeddingGemma 300M Q4_0 / Chatterbox EN-ES Q4F16 / Parakeet TDT INT8 (encoder + decoder + preprocessor + vocab). (Plan 1 originally shipped Llama 3.2 1B; switched to Qwen3 4B for answer quality — see MODEL_TRADEOFFS.md.)
 - A single ambient `tools/types/qvac-shim.d.ts` works around a `@qvac/sdk` v0.11.0 `.d.ts` issue where extension-less re-exports trip NodeNext resolution. Documented in [docs/superpowers/notes/2026-05-26-qvac-spike.md](docs/superpowers/notes/2026-05-26-qvac-spike.md).
 
 ### Retrieval & RAG
