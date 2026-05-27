@@ -384,6 +384,41 @@ async function routeMessage(
         return { kind: "memory.list", memories };
       });
     }
+    case "entity.list": {
+      return requireVaultActive(deps, async () => {
+        const repo = deps.getRepo();
+        const items =
+          msg.entityKind === "person" ? await repo.listPersons() :
+          msg.entityKind === "place"  ? await repo.listPlaces()  :
+          msg.entityKind === "event"  ? await repo.listEvents()  :
+          await repo.listTasks();
+        return { kind: "entity.results", entityKind: msg.entityKind, items };
+      });
+    }
+    case "entity.get": {
+      return requireVaultActive(deps, async () => {
+        const repo = deps.getRepo();
+        const list =
+          msg.entityKind === "person" ? await repo.listPersons() :
+          msg.entityKind === "place"  ? await repo.listPlaces()  :
+          msg.entityKind === "event"  ? await repo.listEvents()  :
+          await repo.listTasks();
+        const record = list.find((r) => r.id === msg.id) ?? null;
+        const indexes = deps.getIndexes();
+        const from = await indexes.relationshipsFrom(msg.id);
+        const to = await indexes.relationshipsTo(msg.id);
+        return { kind: "entity.detail", entityKind: msg.entityKind, record, from, to };
+      });
+    }
+    case "relationship.list": {
+      return requireVaultActive(deps, async () => {
+        const indexes = deps.getIndexes();
+        const dir = msg.direction ?? "both";
+        const from = dir !== "to" ? await indexes.relationshipsFrom(msg.recordId) : [];
+        const to = dir !== "from" ? await indexes.relationshipsTo(msg.recordId) : [];
+        return { kind: "relationship.results", recordId: msg.recordId, from, to };
+      });
+    }
     case "memory.reindex": {
       return requireVaultActive(deps, async () => {
         const r = await reindexAllMemories({

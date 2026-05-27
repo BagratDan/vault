@@ -40,6 +40,21 @@ const memoryList = z.object({
 
 const memoryReindexSchema = z.object({ kind: z.literal("memory.reindex") });
 
+const entityList = z.object({
+  kind: z.literal("entity.list"),
+  entityKind: z.enum(["person", "place", "event", "task"]),
+});
+const entityGet = z.object({
+  kind: z.literal("entity.get"),
+  entityKind: z.enum(["person", "place", "event", "task"]),
+  id: z.string(),
+});
+const relationshipList = z.object({
+  kind: z.literal("relationship.list"),
+  recordId: z.string(),
+  direction: z.enum(["from", "to", "both"]).optional(),
+});
+
 const ttsPlay = z.object({
   kind: z.literal("tts.play"),
   text: z.string().min(1),
@@ -128,6 +143,9 @@ export const clientMessageShape = z.discriminatedUnion("kind", [
   memoryGet,
   memoryList,
   memoryReindexSchema,
+  entityList,
+  entityGet,
+  relationshipList,
   ttsPlay,
   vaultStatus,
   vaultCreate,
@@ -369,11 +387,43 @@ const folderDeletedReplySchema = z.object({
   folderId: z.string(),
 });
 
+const relEdgeFrom = z.object({
+  relId: z.string(),
+  toId: z.string(),
+  type: z.string(),
+});
+const relEdgeTo = z.object({
+  relId: z.string(),
+  fromId: z.string(),
+  type: z.string(),
+});
+const entityResults = z.object({
+  kind: z.literal("entity.results"),
+  entityKind: z.enum(["person", "place", "event", "task"]),
+  items: z.array(z.record(z.string(), z.unknown())),
+});
+const entityDetail = z.object({
+  kind: z.literal("entity.detail"),
+  entityKind: z.enum(["person", "place", "event", "task"]),
+  record: z.record(z.string(), z.unknown()).nullable(),
+  from: z.array(relEdgeFrom),
+  to: z.array(relEdgeTo),
+});
+const relationshipResults = z.object({
+  kind: z.literal("relationship.results"),
+  recordId: z.string(),
+  from: z.array(relEdgeFrom),
+  to: z.array(relEdgeTo),
+});
+
 export const serverMessageShape = z.discriminatedUnion("kind", [
   captureAck,
   searchHits,
   memoryListReply,
   memoryReindexReply,
+  entityResults,
+  entityDetail,
+  relationshipResults,
   answerChunk,
   answerDone,
   ttsChunk,
