@@ -21,6 +21,7 @@ import { openAutobeeStore } from "../src/store.js";
 import { signCanonical } from "../src/sign.js";
 import { FolderLocal } from "../src/folder-local.js";
 import { Repo } from "../src/repo.js";
+import { Indexes } from "../src/indexes.js";
 import { newUlid } from "@vault/domain";
 
 const dirs: string[] = [];
@@ -59,16 +60,23 @@ describe("folder-scoped retrieval (search primitives)", () => {
     const fl = new FolderLocal(flDir);
     await fl.ready();
     const repo = new Repo({ view: store.view, append: store.append, ownerPeerId: founderPeerId, folderLocal: fl });
+    const indexes = new Indexes({ view: store.view, append: store.append });
 
     const folderA = newUlid();
     const folderB = newUlid();
-    await repo.putMemoryByVisibility(memFixture(founderPeerId, folderA, "alpha-in-A"), "public");
-    await repo.putMemoryByVisibility(memFixture(founderPeerId, folderA, "beta-in-A"), "public");
-    await repo.putMemoryByVisibility(memFixture(founderPeerId, folderB, "gamma-in-B"), "public");
+    const alpha = memFixture(founderPeerId, folderA, "alpha-in-A");
+    const beta = memFixture(founderPeerId, folderA, "beta-in-A");
+    const gamma = memFixture(founderPeerId, folderB, "gamma-in-B");
+    await repo.putMemoryByVisibility(alpha, "public");
+    await repo.putMemoryByVisibility(beta, "public");
+    await repo.putMemoryByVisibility(gamma, "public");
+    await indexes.indexFolderMembership(folderA, alpha.id);
+    await indexes.indexFolderMembership(folderA, beta.id);
+    await indexes.indexFolderMembership(folderB, gamma.id);
     await store.flush();
 
-    const inA = await repo.listMemoriesInFolder(folderA);
-    const inB = await repo.listMemoriesInFolder(folderB);
+    const inA = await repo.listMemoriesInFolder(folderA, indexes);
+    const inB = await repo.listMemoriesInFolder(folderB, indexes);
     expect(inA.map((m) => m.summary).sort()).toEqual(["alpha-in-A", "beta-in-A"]);
     expect(inB.map((m) => m.summary)).toEqual(["gamma-in-B"]);
 
@@ -87,14 +95,17 @@ describe("folder-scoped retrieval (search primitives)", () => {
     const fl = new FolderLocal(flDir);
     await fl.ready();
     const repo = new Repo({ view: store.view, append: store.append, ownerPeerId: founderPeerId, folderLocal: fl });
+    const indexes = new Indexes({ view: store.view, append: store.append });
 
     // Same folderId, one public memory + one private memory:
     const folderId = newUlid();
-    await repo.putMemoryByVisibility(memFixture(founderPeerId, folderId, "public-mem"), "public");
+    const pub = memFixture(founderPeerId, folderId, "public-mem");
+    await repo.putMemoryByVisibility(pub, "public");
     await repo.putMemoryByVisibility(memFixture(founderPeerId, folderId, "private-mem"), "private");
+    await indexes.indexFolderMembership(folderId, pub.id);
     await store.flush();
 
-    const all = await repo.listMemoriesInFolder(folderId);
+    const all = await repo.listMemoriesInFolder(folderId, indexes);
     expect(all.map((m) => m.summary).sort()).toEqual(["private-mem", "public-mem"]);
 
     await fl.close();

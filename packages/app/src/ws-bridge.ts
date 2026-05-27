@@ -285,7 +285,7 @@ async function routeMessage(
         if (onlyFolderId) {
           const intent = await classifyAskIntent(deps.pool, msg.query);
           if (intent === "summary") {
-            const docs = await deps.getRepo().listMemoriesInFolder(onlyFolderId);
+            const docs = await deps.getRepo().listMemoriesInFolder(onlyFolderId, deps.getIndexes());
             const requestId = newUlid();
             queueMicrotask(() => {
               void streamFolderSummary(deps, conn, requestId, onlyFolderId);
@@ -558,6 +558,7 @@ async function routeMessage(
             fs: deps.fs,
             folderLocal: fl,
             getRepo: deps.getRepo,
+            getIndexes: deps.getIndexes,
             pool: deps.pool,
             // Folder ownerPeerId MUST be the autobee writer key (store.localPeerId),
             // not identity.peerId — apply()'s folder gate requires
@@ -582,6 +583,7 @@ async function routeMessage(
           fs: deps.fs,
           folderLocal: fl,
           getRepo: deps.getRepo,
+          getIndexes: deps.getIndexes,
           pool: deps.pool,
           ownerPeerId: deps.runtime.store?.localPeerId ?? deps.identity.peerId,
           storeSecretKey: deps.runtime.store?.secretKey ?? new Uint8Array(64),
@@ -600,7 +602,7 @@ async function routeMessage(
         }
         const r = await folderRoutes.folderUpdate(
           {
-            fs: deps.fs, folderLocal: fl, getRepo: deps.getRepo, pool: deps.pool,
+            fs: deps.fs, folderLocal: fl, getRepo: deps.getRepo, getIndexes: deps.getIndexes, pool: deps.pool,
             ownerPeerId: deps.runtime.store.localPeerId, storeSecretKey: deps.runtime.store.secretKey,
             broadcast: deps.broadcast,
             workspace: deps.workspace,
@@ -623,7 +625,7 @@ async function routeMessage(
         }
         const r = await folderRoutes.folderDelete(
           {
-            fs: deps.fs, folderLocal: fl, getRepo: deps.getRepo, pool: deps.pool,
+            fs: deps.fs, folderLocal: fl, getRepo: deps.getRepo, getIndexes: deps.getIndexes, pool: deps.pool,
             ownerPeerId: deps.runtime.store.localPeerId, storeSecretKey: deps.runtime.store.secretKey,
             broadcast: deps.broadcast,
             workspace: deps.workspace,
@@ -642,7 +644,7 @@ async function routeMessage(
         }
         await folderRoutes.folderRescan(
           {
-            fs: deps.fs, folderLocal: fl, getRepo: deps.getRepo, pool: deps.pool,
+            fs: deps.fs, folderLocal: fl, getRepo: deps.getRepo, getIndexes: deps.getIndexes, pool: deps.pool,
             ownerPeerId: deps.runtime.store.localPeerId, storeSecretKey: deps.runtime.store.secretKey,
             broadcast: deps.broadcast,
             workspace: deps.workspace,
@@ -670,6 +672,7 @@ async function buildFolderStats(
       fs: deps.fs,
       folderLocal: fl,
       getRepo: deps.getRepo,
+      getIndexes: deps.getIndexes,
       pool: deps.pool,
       ownerPeerId: deps.runtime.store.localPeerId,
       storeSecretKey: deps.runtime.store.secretKey,
@@ -696,7 +699,7 @@ async function streamFolderSummary(
   requestId: string,
   folderId: string
 ): Promise<void> {
-  const docs = await deps.getRepo().listMemoriesInFolder(folderId);
+  const docs = await deps.getRepo().listMemoriesInFolder(folderId, deps.getIndexes());
   if (docs.length === 0) {
     conn.send({
       kind: "answer.chunk",

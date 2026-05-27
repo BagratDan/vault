@@ -9,7 +9,7 @@ import {
   type Memory,
   type SourceRecord,
 } from "@vault/domain";
-import { signCanonical, type FolderLocal, type Repo } from "@vault/sync";
+import { signCanonical, type FolderLocal, type Repo, type Indexes } from "@vault/sync";
 import {
   parseText,
   parsePdf,
@@ -27,6 +27,7 @@ export interface FolderRoutesDeps {
   fs: VaultFs;
   folderLocal: FolderLocal;
   getRepo: () => Repo;
+  getIndexes: () => Indexes;
   pool: ModelPool;
   ownerPeerId: string;
   storeSecretKey: Uint8Array;
@@ -225,7 +226,7 @@ export async function folderList(deps: FolderRoutesDeps): Promise<{
 
   for (const f of publicFolders) {
     if (f.deletedAt) continue;
-    const memories = await deps.getRepo().listMemoriesInFolder(f.id);
+    const memories = await deps.getRepo().listMemoriesInFolder(f.id, deps.getIndexes());
     const entry: Entry = {
       folderId: f.id,
       displayName: f.displayName,
@@ -299,7 +300,7 @@ export async function folderDelete(
   if (current.ownerPeerId !== deps.ownerPeerId) throw new Error(`folder-not-owner: ${input.folderId}`);
   const now = new Date().toISOString();
   await deps.folderLocal.putFolder({ ...current, updatedAt: now, deletedAt: now });
-  const memories = await deps.getRepo().listMemoriesInFolder(input.folderId);
+  const memories = await deps.getRepo().listMemoriesInFolder(input.folderId, deps.getIndexes());
   for (const m of memories) {
     await deps.getRepo().markMemoryDeleted(m.id);
   }

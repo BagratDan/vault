@@ -220,24 +220,33 @@ describe("Repo — Plan 4 folder-aware methods", () => {
         summary: "public",
         body: "x",
       };
-      // A view that returns the public memory from listMemories:
+      // A Map-backed view/append the repo + indexes share, holding the public
+      // memory and its folder-membership index entry:
+      const kv = new Map<string, unknown>([[`mem/${pubMem.id}`, pubMem]]);
       const view = {
-        async get() {
-          return null;
+        async get(key: string) {
+          return kv.has(key) ? { value: kv.get(key) } : null;
         },
-        async *createReadStream(opts: { gte?: string }) {
-          if (opts.gte === "mem/") {
-            yield { key: `mem/${pubMem.id}`, value: pubMem };
+        async *createReadStream(opts: { gte?: string; lt?: string }) {
+          for (const key of [...kv.keys()].sort()) {
+            if (opts.gte && key < opts.gte) continue;
+            if (opts.lt && key >= opts.lt) continue;
+            yield { key, value: kv.get(key) };
           }
         },
       };
-      const append = async () => undefined;
+      const append = async (op: unknown) => {
+        const o = op as { key: string; value: unknown };
+        kv.set(o.key, o.value);
+      };
       const repo = new Repo({
         view: view as never,
         append,
         ownerPeerId,
         folderLocal: fl,
       });
+      const indexes = new Indexes({ view: view as never, append });
+      await indexes.indexFolderMembership(folderId, pubMem.id);
 
       await fl.putPrivateMemory({
         ...base,
@@ -246,7 +255,7 @@ describe("Repo — Plan 4 folder-aware methods", () => {
         body: "y",
       });
 
-      const all = await repo.listMemoriesInFolder(folderId);
+      const all = await repo.listMemoriesInFolder(folderId, indexes);
       const summaries = all.map((m) => m.summary).sort();
       expect(summaries).toEqual(["private", "public"]);
     } finally {

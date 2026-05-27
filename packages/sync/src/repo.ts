@@ -21,6 +21,7 @@ import {
   type Ulid,
 } from "@vault/domain";
 import type { FolderLocal } from "./folder-local.js";
+import type { Indexes } from "./indexes.js";
 
 const PREFIX = {
   memory: "mem/",
@@ -92,10 +93,14 @@ export class Repo {
     await this.putMemory(m); // existing autobee path
   }
 
-  /** Union the owner's public (autobee) + private (FolderLocal) memories for a folder. */
-  async listMemoriesInFolder(folderId: string): Promise<Memory[]> {
-    const all = await this.listMemories();
-    const publicHits = all.filter((m) => m.folderId === folderId);
+  /** Union the owner's public (autobee, via folder index) + private (FolderLocal) memories. */
+  async listMemoriesInFolder(folderId: string, indexes: Indexes): Promise<Memory[]> {
+    const ids = await indexes.memoryIdsForFolder(folderId);
+    const publicHits: Memory[] = [];
+    for (const id of ids) {
+      const m = await this.getMemory(id as Ulid);
+      if (m) publicHits.push(m);
+    }
     let privateHits: Memory[] = [];
     if (this.folderLocal) {
       privateHits = await this.folderLocal.listPrivateMemoriesByFolder(folderId);

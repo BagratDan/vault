@@ -22,6 +22,10 @@ function makeDeps(): Parameters<typeof folderAdd>[0] {
         listMemoriesInFolder: async () => [],
         markMemoryDeleted: async () => undefined,
       }) as never,
+    getIndexes: () =>
+      ({
+        memoryIdsForFolder: async () => [],
+      }) as never,
     pool: {} as never,
     ownerPeerId: HEX_64,
     storeSecretKey: new Uint8Array(64),
