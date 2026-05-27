@@ -3,7 +3,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import {
   newUlid,
-  asUlid,
   type Folder,
   type FolderPublic,
   type FolderVisibility,
@@ -19,9 +18,10 @@ import {
   scanFolder,
   type ScannedFile,
 } from "@vault/ingest";
-import { ensureEmbedModel, embedText, type ModelPool } from "@vault/ai";
+import { type ModelPool } from "@vault/ai";
 import type { Workspace } from "@vault/retrieval";
 import type { VaultFs } from "../vault-fs.js";
+import { chunkAndEmbed } from "../chunk-embed.js";
 
 export interface FolderRoutesDeps {
   fs: VaultFs;
@@ -163,28 +163,12 @@ async function runIngest(deps: FolderRoutesDeps, folder: Folder): Promise<void> 
         folderId: folder.id,
       };
       await deps.getRepo().putMemoryByVisibility(memory, folder.visibility);
-      // Embed into the search workspace so the memory is findable. Without
-      // this the memory is stored but never indexed → search returns nothing.
-      try {
-        const embedModelId = await ensureEmbedModel(deps.pool);
-        const vector = await embedText(deps.pool, memory.body);
-        await deps.workspace.ingest({
-          memoryId: asUlid(memory.id),
-          body: memory.body,
-          tags: memory.tags,
-          embedding: vector,
-          embeddingModelId: embedModelId,
-          metadata: {
-            ownerPeerId: deps.ownerPeerId,
-            createdAt: memory.createdAt,
-          },
-        });
-      } catch (err) {
-        // Embedding is best-effort per file; a failure here shouldn't abort
-        // the whole folder ingest. The memory is still stored; it just won't
-        // be searchable until a re-scan.
-        console.warn("[vault] folder ingest: embed failed for", memory.id, err);
-      }
+      // Chunk + embed so large files are searchable (whole-body embed
+      // overflowed EmbeddingGemma's 1024-token limit and silently failed).
+      await chunkAndEmbed(
+        { pool: deps.pool, workspace: deps.workspace, ownerPeerId: deps.ownerPeerId },
+        memory
+      );
       ingested++;
     } catch {
       errors++;
