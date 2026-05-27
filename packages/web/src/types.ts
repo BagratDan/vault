@@ -2,6 +2,8 @@
 // We avoid depending on @vault/app at runtime so Vite doesn't try to
 // bundle its Node-only transitive deps (Hyperbee, @qvac/sdk, etc.).
 
+export interface RelEdge { relId: string; toId?: string; fromId?: string; type: string }
+
 export type ClientMessage =
   | { kind: "capture.text"; text: string; tags: string[] }
   | { kind: "capture.audio"; audioBase64: string; tags: string[] }
@@ -20,6 +22,9 @@ export type ClientMessage =
   | { kind: "memory.get"; memoryId: string }
   | { kind: "memory.list"; limit?: number }
   | { kind: "memory.reindex" }
+  | { kind: "entity.list"; entityKind: "person" | "place" | "event" | "task" }
+  | { kind: "entity.get"; entityKind: "person" | "place" | "event" | "task"; id: string }
+  | { kind: "relationship.list"; recordId: string; direction?: "from" | "to" | "both" }
   | { kind: "tts.play"; text: string; requestId: string }
   | { kind: "vault.status" }
   | { kind: "vault.create"; displayName: string }
@@ -83,6 +88,9 @@ export type ServerMessage =
       }>;
     }
   | { kind: "memory.reindex"; memories: number; embedded: number; errors: number }
+  | { kind: "entity.results"; entityKind: "person" | "place" | "event" | "task"; items: Array<Record<string, unknown>> }
+  | { kind: "entity.detail"; entityKind: "person" | "place" | "event" | "task"; record: Record<string, unknown> | null; from: RelEdge[]; to: RelEdge[] }
+  | { kind: "relationship.results"; recordId: string; from: RelEdge[]; to: RelEdge[] }
   | { kind: "answer.chunk"; requestId: string; text: string }
   | { kind: "answer.done"; requestId: string; citations: Citation[] }
   | { kind: "tts.chunk"; requestId: string; audioBase64: string }
