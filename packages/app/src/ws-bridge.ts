@@ -30,7 +30,7 @@ import {
 } from "./routes/consent.js";
 import type { ConsentState } from "./consent-state.js";
 import * as folderRoutes from "./routes/folder.js";
-import { complete, type ChatMessage } from "@vault/ai";
+import { complete, buildAnswerContext, type ChatMessage } from "@vault/ai";
 import { newUlid, type Ulid } from "@vault/domain";
 
 /**
@@ -281,8 +281,9 @@ async function routeMessage(
           }
         );
         const requestId = newUlid();
+        const folderStats = await buildFolderStats(deps, msg.folderIds);
         queueMicrotask(() => {
-          void streamAnswer(deps, conn, requestId, msg.query, hits);
+          void streamAnswer(deps, conn, requestId, msg.query, hits, folderStats);
         });
         return {
           kind: "search.hits",
@@ -610,14 +611,52 @@ async function routeMessage(
   }
 }
 
+/** Build a one-line folder-stats string ("Sample has 80 files; Acme has 2
+ *  files") for the Ask context, scoped to `folderIds` when provided. Returns
+ *  "" when no folders are in scope. Reuses the folder.list computation. */
+async function buildFolderStats(
+  deps: BridgeDeps,
+  folderIds?: string[]
+): Promise<string> {
+  const fl = deps.getFolderLocal();
+  if (!fl || !deps.runtime.store) return "";
+  try {
+    const { folders } = await folderRoutes.folderList({
+      fs: deps.fs,
+      folderLocal: fl,
+      getRepo: deps.getRepo,
+      pool: deps.pool,
+      ownerPeerId: deps.runtime.store.localPeerId,
+      storeSecretKey: deps.runtime.store.secretKey,
+      broadcast: deps.broadcast,
+      workspace: deps.workspace,
+      flushStore: async () => {
+        if (deps.runtime.store) await deps.runtime.store.flush();
+      },
+    });
+    const allow = folderIds && folderIds.length > 0 ? new Set(folderIds) : null;
+    const scoped = allow ? folders.filter((f) => allow.has(f.folderId)) : folders;
+    if (scoped.length === 0) return "";
+    return scoped
+      .map((f) => `${f.displayName} has ${f.fileCount} files`)
+      .join("; ");
+  } catch {
+    return "";
+  }
+}
+
 async function streamAnswer(
   deps: BridgeDeps,
   conn: Conn,
   requestId: string,
   query: string,
-  hits: readonly SearchHitForAnswer[]
+  hits: readonly SearchHitForAnswer[],
+  folderStats?: string
 ): Promise<void> {
-  if (hits.length === 0) {
+  // Only short-circuit when we have NOTHING to ground an answer in — no
+  // snippets AND no folder stats. With stats but no snippets we still call
+  // the LLM so count/metadata questions ("how many files") get answered.
+  if (hits.length === 0 && !folderStats) {
     conn.send({
       kind: "answer.chunk",
       requestId,
@@ -626,17 +665,18 @@ async function streamAnswer(
     conn.send({ kind: "answer.done", requestId, citations: [] });
     return;
   }
-  const context = hits
-    .slice(0, 4)
-    .map((h, i) => `[${i + 1}] ${h.snippet}`)
-    .join("\n");
+  const userContent = buildAnswerContext({
+    question: query,
+    snippets: hits.map((h) => h.snippet),
+    ...(folderStats ? { folderStats } : {}),
+  });
   const messages: ChatMessage[] = [
     {
       role: "system",
       content:
-        "Answer the user's question grounded ONLY in the provided snippets. Use [1], [2] inline citations.",
+        "Answer the user's question grounded ONLY in the provided snippets and folder context. Use [1], [2] inline citations when you cite a snippet.",
     },
-    { role: "user", content: `Snippets:\n${context}\n\nQuestion: ${query}` },
+    { role: "user", content: userContent },
   ];
   try {
     const text = await complete(deps.pool, messages);
