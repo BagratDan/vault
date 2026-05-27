@@ -942,7 +942,7 @@ export function App() {
 
   return (
     <div className="flex min-h-screen">
-      <Sidebar current={route} onNavigate={navigate} />
+      <Sidebar current={route} onNavigate={navigate} showAdmin={vaultStateView === "admin"} />
       <div className="min-w-0 flex-1 overflow-x-hidden">{content}</div>
       <ToastQueue
         toasts={toasts}

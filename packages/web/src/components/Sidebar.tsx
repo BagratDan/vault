@@ -11,13 +11,23 @@ const ITEMS: { route: Route; label: string }[] = [
   { route: "audit", label: "Team" },
 ];
 
-export function Sidebar({ current, onNavigate }: { current: Route; onNavigate: (r: Route) => void }) {
+export function Sidebar({
+  current,
+  onNavigate,
+  showAdmin = false,
+}: {
+  current: Route;
+  onNavigate: (r: Route) => void;
+  /** Admins also get an Admin destination (member list / revoke). */
+  showAdmin?: boolean;
+}) {
+  const items = showAdmin ? [...ITEMS, { route: "admin" as Route, label: "Admin" }] : ITEMS;
   return (
     <nav
       className="flex w-48 shrink-0 flex-col gap-1 border-r border-slate-800 p-3"
       aria-label="Primary"
     >
-      {ITEMS.map((it) => {
+      {items.map((it) => {
         const active = current === it.route;
         return (
           <a

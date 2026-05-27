@@ -499,6 +499,10 @@ export async function startVault(): Promise<VaultHandle> {
           append: runtime.store.append,
         });
         await bfRepo.backfillIndexes(bfIndexes);
+        // Flush so the backfill writes (incl. the meta/__backfill_v1 sentinel)
+        // reach the autobee view; otherwise the O(1) fast path never engages
+        // and every startup re-runs the per-memory scan.
+        await runtime.store.flush();
       } catch (err) {
         console.warn("[vault] index backfill failed:", err);
       }
