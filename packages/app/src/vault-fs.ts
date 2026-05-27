@@ -64,7 +64,8 @@ export class VaultFs {
    * a system directory. The deepest existing ancestor is realpath'd to
    * catch symlink-based escapes.
    */
-  async resolveSafeAbsolute(absPath: string): Promise<string> {
+  async resolveSafeAbsolute(rawPath: string): Promise<string> {
+    const absPath = sanitizeUserPath(rawPath);
     if (!path.isAbsolute(absPath)) {
       throw new Error(`refused: ${absPath} is not absolute`);
     }
@@ -148,4 +149,43 @@ export class VaultFs {
   path(rel: string): string {
     return path.resolve(this.root, rel);
   }
+}
+
+/**
+ * Normalize a user-supplied filesystem path before validation. Handles the
+ * real-world mangling that happens when a user copies a path on macOS and
+ * pastes it into a web input:
+ *
+ *  - macOS Finder "Copy as Pathname" / title-bar drag prepends Unicode
+ *    directional-formatting marks (U+202A LRE … U+202C PDF, plus LRM/RLM,
+ *    and a zero-width BOM/space can sneak in). These make `path.isAbsolute`
+ *    return false even though the visible text starts with "/".
+ *  - A leading "~" or "~/" is expanded to the user's home directory.
+ *  - Surrounding whitespace and matched quotes are trimmed.
+ *
+ * This runs at the trust boundary (resolveSafeAbsolute) and only NORMALIZES
+ * the input — the realpath + refuse-list + $HOME checks still gate the
+ * cleaned path, so sanitizing here does not weaken the security model.
+ */
+export function sanitizeUserPath(input: string): string {
+  // Strip Unicode bidi/format/zero-width controls anywhere in the string:
+  // ZWSP/ZWNJ/ZWJ (U+200B-200D), LRM/RLM (U+200E-200F),
+  // LRE/RLE/PDF/LRO/RLO (U+202A-202E), LRI/RLI/FSI/PDI (U+2066-2069), BOM (U+FEFF).
+  let p = input.replace(
+    /[​-‏‪-‮⁦-⁩﻿]/gu,
+    ""
+  );
+  p = p.trim();
+  // Strip a single pair of surrounding quotes (users sometimes paste with them).
+  if (
+    (p.startsWith('"') && p.endsWith('"')) ||
+    (p.startsWith("'") && p.endsWith("'"))
+  ) {
+    p = p.slice(1, -1).trim();
+  }
+  // Expand a leading ~ / ~/ to the home directory.
+  if (p === "~" || p.startsWith("~/")) {
+    p = path.join(os.homedir(), p.slice(1));
+  }
+  return p;
 }

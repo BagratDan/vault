@@ -81,4 +81,44 @@ describe("VaultFs.resolveSafeAbsolute", () => {
       /outside \$HOME/
     );
   });
+
+  // Regression: macOS Finder "Copy as Pathname" / title-bar drag prepends a
+  // U+202A LEFT-TO-RIGHT EMBEDDING (and often a trailing U+202C). The visible
+  // text looks absolute but path.isAbsolute returned false → "not absolute".
+  it("strips a leading U+202A LRE (macOS Finder copy)", async () => {
+    const home = os.homedir();
+    const mangled = "‪" + home + "‬";
+    await expect(fsApi.resolveSafeAbsolute(mangled)).resolves.toBe(home);
+  });
+
+  it("strips embedded bidi/zero-width marks and surrounding whitespace", async () => {
+    const home = os.homedir();
+    const mangled = "  ​" + home + "‎  ";
+    await expect(fsApi.resolveSafeAbsolute(mangled)).resolves.toBe(home);
+  });
+
+  it("strips matched surrounding quotes", async () => {
+    const home = os.homedir();
+    await expect(fsApi.resolveSafeAbsolute(`"${home}"`)).resolves.toBe(home);
+  });
+
+  it("expands a leading ~ to the home directory", async () => {
+    const home = os.homedir();
+    await expect(fsApi.resolveSafeAbsolute("~")).resolves.toBe(home);
+  });
+
+  it("expands a leading ~/subdir to under home", async () => {
+    const home = os.homedir();
+    // "~/Documents" → join(home, "/Documents"). Use a subdir that exists under
+    // every home: the home dir itself via "~/." normalizes back to home.
+    await expect(fsApi.resolveSafeAbsolute("~/.")).resolves.toBe(
+      path.join(home, "/.")
+    );
+  });
+
+  it("still rejects a genuinely relative path after sanitizing", async () => {
+    await expect(
+      fsApi.resolveSafeAbsolute("‪relative/path")
+    ).rejects.toThrow(/not absolute/);
+  });
 });

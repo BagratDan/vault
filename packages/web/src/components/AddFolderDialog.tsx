@@ -34,6 +34,14 @@ export function AddFolderDialog({ onSubmit, onCancel }: AddFolderDialogProps) {
         <label className="block">
           <span className="text-xs text-slate-400">Absolute path on your disk</span>
           <input type="text" value={path} onChange={(e) => handlePathChange(e.target.value)} placeholder="/Users/sarah/Documents/Acme" className="mt-1 w-full rounded-lg bg-slate-800 px-3 py-2 font-mono text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+          <span className="mt-1 block text-[11px] leading-snug text-slate-500">
+            Starts with <code className="text-slate-400">/</code> (or{" "}
+            <code className="text-slate-400">~/</code>), under your home folder.
+            On macOS: in Finder right-click the folder → hold Option → “Copy
+            <span className="whitespace-nowrap"> “…” as Pathname</span>”, then
+            paste here. Hidden copy/paste characters and surrounding quotes are
+            stripped automatically.
+          </span>
         </label>
         <label className="mt-3 block">
           <span className="text-xs text-slate-400">Display name</span>
