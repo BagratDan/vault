@@ -18,12 +18,21 @@ export interface SearchHit {
   tags: string[];
 }
 
+/** Recover the parent memoryId from a chunk document id `<memoryId>#<ci>`.
+ *  Legacy un-chunked ids (no '#') are their own parent. */
+function parentMemoryId(docId: string): string {
+  const i = docId.lastIndexOf("#");
+  return i === -1 ? docId : docId.slice(0, i);
+}
+
 export async function search(input: SearchInput): Promise<SearchHit[]> {
   const raw = await ragSearch({
     modelId: input.modelId,
     workspace: input.workspace,
     query: input.query,
-    topK: input.k,
+    // Over-fetch: several top chunks may share one parent, so widen before
+    // dedup so distinct files aren't lost. Sliced back to k after dedup.
+    topK: input.k * 4,
   });
 
   // The SDK's SearchResult only carries { id, content, score }. Metadata
@@ -48,6 +57,17 @@ export async function search(input: SearchInput): Promise<SearchHit[]> {
       tags: [],
     });
   }
-  filtered.sort((a, b) => b.score - a.score);
-  return filtered;
+  // Collapse chunk hits to one result per parent memory, keeping the
+  // highest-scoring chunk (its content becomes the snippet). Downstream
+  // flows (folderId resolution, consent, citations) key off the parent id.
+  const bestByParent = new Map<string, SearchHit>();
+  for (const h of filtered) {
+    const parent = parentMemoryId(h.memoryId);
+    const prev = bestByParent.get(parent);
+    if (!prev || h.score > prev.score) {
+      bestByParent.set(parent, { ...h, memoryId: parent });
+    }
+  }
+  const deduped = [...bestByParent.values()].sort((a, b) => b.score - a.score);
+  return deduped.slice(0, input.k);
 }
