@@ -27,6 +27,38 @@ export interface CaptureDeps {
   capturesFolderId: string;
 }
 
+/**
+ * Write a single typed relationship edge (memory is always the `from`).
+ * Best-effort per edge: if the record or index write throws (e.g. a shape
+ * failure on a derived entity id), warn and continue rather than aborting the
+ * whole capture — consistent with the "drop per-entity extraction failure"
+ * pattern in extract.ts.
+ */
+async function writeEdge(
+  deps: CaptureDeps,
+  fromId: string,
+  toId: string,
+  type: Relationship["type"]
+): Promise<void> {
+  const t = new Date().toISOString();
+  const rel: Relationship = {
+    id: newUlid(),
+    createdAt: t,
+    updatedAt: t,
+    ownerPeerId: deps.ownerPeerId,
+    provenance: { kind: "extraction" },
+    fromId: asUlid(fromId),
+    toId: asUlid(toId),
+    type,
+  };
+  try {
+    await deps.repo.putRelationship(rel);
+    await deps.indexes.indexRelationship(rel.id, fromId, toId, type);
+  } catch (err) {
+    console.warn(`[vault] dropping edge ${type} ${fromId}->${toId}:`, err);
+  }
+}
+
 export interface CaptureTextInput {
   text: string;
   tags: readonly string[];
@@ -130,6 +162,15 @@ export async function captureText(
   for (const t of ext.tasks) await deps.repo.putTask(t);
   for (const r of ext.externalRefs) await deps.repo.putExternalRef(r);
 
+  // Typed relationship edges (memory is always the `from`). Tasks AND
+  // externalRefs both map to "references" (intentional — see relationshipShape).
+  await writeEdge(deps, ext.memory.id, src.id, "derived-from");
+  for (const p of ext.people) await writeEdge(deps, ext.memory.id, p.id, "mentions");
+  for (const pl of ext.places) await writeEdge(deps, ext.memory.id, pl.id, "located-at");
+  for (const e of ext.events) await writeEdge(deps, ext.memory.id, e.id, "attended-by");
+  for (const t of ext.tasks) await writeEdge(deps, ext.memory.id, t.id, "references");
+  for (const r of ext.externalRefs) await writeEdge(deps, ext.memory.id, r.id, "references");
+
   // 6. Secondary indexes (tags from extraction + user-provided tags merged)
   const allTags = [...ext.memory.tags, ...input.tags];
   await deps.indexes.indexTags(ext.memory.id, allTags);
@@ -137,6 +178,18 @@ export async function captureText(
     ext.memory.id,
     ext.people.map((p) => p.id)
   );
+
+  // Folder membership + meta side-index. Capture memories use the "Captures"
+  // folder and always go through the autobee putMemory path above, so indexing
+  // here mirrors the autobee storage tier (unlike runIngest, which gates these
+  // by visibility). No visibility guard needed.
+  await deps.indexes.indexFolderMembership(ext.memory.folderId, ext.memory.id);
+  await deps.indexes.indexMeta(ext.memory.id, {
+    tags: allTags,
+    ownerPeerId: ext.memory.ownerPeerId,
+    createdAt: ext.memory.createdAt,
+    personIds: ext.people.map((p) => p.id),
+  });
 
   // 7. Chunk + embed so long captures are searchable (a single-shot embed
   //    of the whole body overflows EmbeddingGemma's 1024-token limit).
