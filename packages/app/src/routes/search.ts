@@ -100,7 +100,13 @@ export async function runSearch(
   }
 
   const peers = deps.swarm?.listConnectedPeers() ?? [];
-  if (peers.length === 0) return applyFilters(localHits, input.filters);
+  if (peers.length === 0) {
+    // Stage 2: re-apply filters across the merged local+remote set. Stage 1
+    // (matchesFilters inside search()) already filtered LOCAL hits, but REMOTE
+    // hits from probe replies bypass Stage 1 — Stage 2 is their only filter
+    // gate. Do NOT remove this even though it looks redundant on the no-peer path.
+    return applyFilters(localHits, input.filters);
+  }
 
   const remoteSettled = await Promise.allSettled(
     peers.map((peerId) =>
@@ -132,6 +138,10 @@ export async function runSearch(
     const prev = byId.get(h.memoryId);
     if (!prev || h.score > prev.score) byId.set(h.memoryId, h);
   }
+  // Stage 2: re-apply filters across the merged local+remote set. Stage 1
+  // (matchesFilters inside search()) already filtered LOCAL hits, but REMOTE
+  // hits from probe replies bypass Stage 1 — Stage 2 is their only filter
+  // gate. Do NOT remove this even though it looks redundant on the no-peer path.
   return applyFilters(
     [...byId.values()].sort((a, b) => b.score - a.score).slice(0, input.k),
     input.filters

@@ -48,8 +48,8 @@ export async function search(input: SearchInput): Promise<SearchHit[]> {
 
   const filtered: SearchHit[] = [];
   for (const r of raw) {
-    const parent = parentMemoryId(r.id);
-    const md = meta.get(parent) ?? {};
+    const chunkParent = parentMemoryId(r.id); // for meta lookup; memoryId stays the chunk id until dedup
+    const md = meta.get(chunkParent) ?? {};
     const hit: RawHit = {
       memoryId: r.id,
       score: r.score,
@@ -57,7 +57,7 @@ export async function search(input: SearchInput): Promise<SearchHit[]> {
       metadata: md,
     };
     if (!matchesFilters(hit, input.filters)) continue;
-    const tags = (md["tags"] ?? "").split(",").filter(Boolean);
+    const tags = (md["tags"] ?? "").split(",").map((t) => t.trim()).filter(Boolean);
     filtered.push({ memoryId: r.id, score: r.score, snippet: r.content, tags });
   }
   // Collapse chunk hits to one result per parent memory, keeping the
