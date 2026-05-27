@@ -317,6 +317,7 @@ async function routeMessage(
             selfPeerId: stampedPeerId,
             repo: deps.getRepo(),
             folderLocal: deps.getFolderLocal(),
+            metaLookup: (ids) => deps.getIndexes().metaForMemories(ids),
           },
           {
             query: msg.query,

@@ -28,6 +28,15 @@ export interface SearchDeps {
    * folder's visibility. Optional / nullable for the same legacy fallback.
    */
   folderLocal?: FolderLocal | null;
+  /**
+   * Resolves side-index metadata for parent memory ids, injected so the
+   * pure @vault/retrieval search() can apply metadata-dependent filters
+   * without importing @vault/sync (preserves the layer rule). Optional:
+   * when absent, search() runs with empty metadata (legacy behavior).
+   */
+  metaLookup?: (
+    ids: readonly string[]
+  ) => Promise<Map<string, Record<string, string>>>;
 }
 
 export interface SearchRouteInput {
@@ -206,6 +215,8 @@ async function searchLocal(
     workspace: deps.workspace.getName(),
     query: input.query,
     k: input.k,
+    ...(input.filters ? { filters: input.filters } : {}),
+    ...(deps.metaLookup ? { metaLookup: deps.metaLookup } : {}),
   });
   // Stamp ownerPeerId so cross-peer dedupe + UI attribution work.
   return hits.map((h) =>

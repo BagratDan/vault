@@ -8,6 +8,9 @@ export interface SearchInput {
   query: string;
   k: number;
   filters?: SearchFilters;
+  /** Resolves side-index metadata for parent memory ids. Injected by the app
+   *  layer so retrieval need not import sync (preserves the layer rule). */
+  metaLookup?: (ids: readonly string[]) => Promise<Map<string, Record<string, string>>>;
 }
 
 export interface SearchHit {
@@ -35,27 +38,27 @@ export async function search(input: SearchInput): Promise<SearchHit[]> {
     topK: input.k * 4,
   });
 
-  // The SDK's SearchResult only carries { id, content, score }. Metadata
-  // we stored at ingest (ownerPeerId, tags, createdAt, ...) is NOT
-  // returned by ragSearch in v0.11.0. Filters that depend on it are
-  // applied client-side and may not have data to act on; for now, only
-  // the id-based filters work post-search. This is a known limitation
-  // and documented in the README's known-limitations section.
+  // The SDK's SearchResult only carries { id, content, score } — metadata
+  // we stored at ingest (ownerPeerId, tags, createdAt, ...) is NOT returned
+  // by ragSearch in v0.11.0. We resolve it from the app-injected side-index
+  // lookup (metaLookup) so the filters below act on real data while keeping
+  // retrieval free of a @vault/sync dependency.
+  const parentIds = [...new Set(raw.map((r) => parentMemoryId(r.id)))];
+  const meta = input.metaLookup ? await input.metaLookup(parentIds) : new Map<string, Record<string, string>>();
+
   const filtered: SearchHit[] = [];
   for (const r of raw) {
+    const parent = parentMemoryId(r.id);
+    const md = meta.get(parent) ?? {};
     const hit: RawHit = {
       memoryId: r.id,
       score: r.score,
       snippet: r.content,
-      metadata: {},
+      metadata: md,
     };
     if (!matchesFilters(hit, input.filters)) continue;
-    filtered.push({
-      memoryId: r.id,
-      score: r.score,
-      snippet: r.content,
-      tags: [],
-    });
+    const tags = (md["tags"] ?? "").split(",").filter(Boolean);
+    filtered.push({ memoryId: r.id, score: r.score, snippet: r.content, tags });
   }
   // Collapse chunk hits to one result per parent memory, keeping the
   // highest-scoring chunk (its content becomes the snippet). Downstream
