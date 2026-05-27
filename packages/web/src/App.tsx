@@ -757,14 +757,14 @@ export function App() {
             Library
           </h2>
           {library.length === 0 ? (
-            <p className="text-sm text-slate-500">No memories yet.</p>
+            <p className="py-8 text-center text-sm text-slate-500">No memories yet.</p>
           ) : (
             <ul className="flex flex-col gap-1">
               {library.map((m) => (
                 <li key={m.memoryId}>
                   <button
                     type="button"
-                    className="text-left text-sm underline"
+                    className="block w-full cursor-pointer rounded-md px-3 py-2 text-left text-sm text-slate-200 transition-colors duration-150 hover:bg-slate-800 hover:text-[#5eead4] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D9488]"
                     onClick={() => navigateRecord("memory", m.memoryId)}
                   >
                     {m.summary || m.memoryId}
@@ -865,7 +865,7 @@ export function App() {
       return (
         <main className="mx-auto max-w-3xl space-y-5 p-6">
           <RouteHeader {...headerProps} />
-          <p className="text-sm text-slate-400">Loading record…</p>
+          <p className="py-8 text-center text-sm text-slate-400">Loading record…</p>
         </main>
       );
     }
@@ -888,7 +888,7 @@ export function App() {
           <button
             type="button"
             onClick={() => navigate(backRoute)}
-            className="mb-3 text-xs text-slate-400 hover:text-slate-200"
+            className="mb-3 cursor-pointer text-xs text-slate-400 transition-colors duration-150 hover:text-[#5eead4] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D9488]"
           >
             ← back
           </button>
@@ -943,7 +943,7 @@ export function App() {
   return (
     <div className="flex min-h-screen">
       <Sidebar current={route} onNavigate={navigate} />
-      <div className="flex-1">{content}</div>
+      <div className="min-w-0 flex-1 overflow-x-hidden">{content}</div>
       <ToastQueue
         toasts={toasts}
         onRespond={(consentRequestId, decision) =>

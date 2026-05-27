@@ -12,18 +12,22 @@ export function RecordDetail({
   onOpen: (id: string) => void;
 }) {
   return (
-    <section className="flex flex-col gap-4">
-      <h2 className="text-lg font-semibold">{title}</h2>
-      <dl className="flex flex-col gap-1">
-        {fields.map((f) => (
-          <div key={f.label} className="flex gap-2 text-sm">
-            <dt className="opacity-60">{f.label}</dt>
-            <dd>{f.value}</dd>
-          </div>
-        ))}
-      </dl>
-      <div>
-        <h3 className="mb-1 text-sm font-medium">Related</h3>
+    <section className="flex flex-col gap-5">
+      <h2 className="text-xl font-semibold tracking-tight text-slate-100">{title}</h2>
+      {fields.length > 0 && (
+        <dl className="flex flex-col gap-2">
+          {fields.map((f) => (
+            <div key={f.label} className="flex flex-col gap-0.5 text-sm sm:flex-row sm:gap-3">
+              <dt className="shrink-0 text-slate-400 sm:w-24">{f.label}</dt>
+              <dd className="whitespace-pre-wrap break-words text-slate-200">{f.value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      <div className="border-t border-slate-800 pt-4">
+        <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-slate-400">
+          Related
+        </h3>
         <RelatedLinks edges={edges} onOpen={onOpen} />
       </div>
     </section>
