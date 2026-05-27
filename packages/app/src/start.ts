@@ -12,6 +12,8 @@ import {
   openAutobeeStore,
   signCanonical,
   verifyCanonical,
+  loadRoster,
+  loadRevoked,
   type MemberClaim,
 } from "@vault/sync";
 import { Workspace } from "@vault/retrieval";
@@ -86,7 +88,11 @@ export async function startVault(): Promise<VaultHandle> {
 
   // The RPC handler dispatches inbound RPC messages from connected peers.
   // Currently: search.probe (federated search). Plan 3 will add consent.request.
-  const rpcHandler = async (method: string, params: unknown): Promise<unknown> => {
+  const rpcHandler = async (
+    peerId: string,
+    method: string,
+    params: unknown
+  ): Promise<unknown> => {
     if (method === "search.probe") {
       // Stamp the autobee writer peerId (same key the roster uses) so the
       // requester can correlate ownerPeerId against the roster + their own
@@ -103,6 +109,15 @@ export async function startVault(): Promise<VaultHandle> {
       // visibility. If either isn't active yet, we cannot safely run the gate,
       // so return no hits rather than risk leaking private memories.
       if (!runtime.folderLocal || !runtime.store) {
+        return { v: 1, requestId: probe.requestId, hits: [] };
+      }
+      // AUTHZ GATE (HIGH-2): the connecting peer's id is its writer key (the
+      // swarm is bound to the writer keyPair). Only admitted, non-revoked
+      // roster members may probe — a revoked or never-admitted peer gets no
+      // hits, closing the read-surface hole revocation didn't cover.
+      const roster = await loadRoster(runtime.store.view);
+      const revoked = await loadRevoked(runtime.store.view);
+      if (!roster.has(peerId) || revoked.has(peerId)) {
         return { v: 1, requestId: probe.requestId, hits: [] };
       }
       return handleSearchProbe(
@@ -203,7 +218,7 @@ export async function startVault(): Promise<VaultHandle> {
     };
 
     const swarm = new SwarmTransport(
-      (method, params) => rpcHandler(method, params),
+      (peerId, method, params) => rpcHandler(peerId, method, params),
       {
         onPeerConnect: async (peerId) => {
           broadcastToClients({
@@ -279,6 +294,11 @@ export async function startVault(): Promise<VaultHandle> {
         // Owner side: a remote peer requested access to one of our memories.
         onConsentRequest: async (peerId, req) => {
           if (!runtime.store || !consentState) return;
+          // AUTHZ GATE (HIGH-2): only admitted, non-revoked members may
+          // request consent. peerId is the connecting peer's writer key.
+          const roster = await loadRoster(runtime.store.view);
+          const revoked = await loadRevoked(runtime.store.view);
+          if (!roster.has(peerId) || revoked.has(peerId)) return;
           const repo = new Repo({
             view: runtime.store.view,
             append: runtime.store.append,
@@ -377,7 +397,16 @@ export async function startVault(): Promise<VaultHandle> {
             });
           }
         },
-      }
+      },
+      // Bind the swarm to the autobee writer keyPair so a connection's noise
+      // pubkey == the peer's writer key == the roster key. Makes consent
+      // grants route correctly and enables roster-gating inbound RPCs.
+      runtime.store
+        ? {
+            publicKey: b4a.from(runtime.store.localPeerId, "hex"),
+            secretKey: runtime.store.secretKey,
+          }
+        : undefined
     );
     await swarm.join(state.topic);
     runtime.swarm = swarm;
