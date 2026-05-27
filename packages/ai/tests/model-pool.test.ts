@@ -2,12 +2,14 @@ import { describe, expect, it, beforeEach, vi } from "vitest";
 import { ModelPool, type ModelHandle } from "../src/model-pool.js";
 
 const loadCalls: string[] = [];
+const loadConfigs: Array<Record<string, unknown> | undefined> = [];
 const unloadCalls: string[] = [];
 
 // Real SDK contract: loadModel returns Promise<string> (the modelId).
 vi.mock("@qvac/sdk", () => ({
-  loadModel: vi.fn(async (opts: { modelSrc: { id: string } }) => {
+  loadModel: vi.fn(async (opts: { modelSrc: { id: string }; modelConfig?: Record<string, unknown> }) => {
     loadCalls.push(opts.modelSrc.id);
+    loadConfigs.push(opts.modelConfig);
     return opts.modelSrc.id;
   }),
   unloadModel: vi.fn(async (opts: { modelId: string }) => {
@@ -29,8 +31,27 @@ const smallHandle = (id: string): ModelHandle => ({
 describe("ModelPool", () => {
   beforeEach(() => {
     loadCalls.length = 0;
+    loadConfigs.length = 0;
     unloadCalls.length = 0;
     vi.clearAllMocks();
+  });
+
+  it("forwards modelConfig to loadModel when the handle sets it", async () => {
+    const pool = new ModelPool({ memoryPressureFloor: 0.95 });
+    const handle: ModelHandle = {
+      id: "llm-cfg",
+      size: "large",
+      src: { id: "llm-cfg" },
+      modelConfig: { ctx_size: 4096 },
+    };
+    await pool.withModel(handle, async (id) => id);
+    expect(loadConfigs[0]).toEqual({ ctx_size: 4096 });
+  });
+
+  it("omits modelConfig from loadModel when the handle does not set it", async () => {
+    const pool = new ModelPool({ memoryPressureFloor: 0.95 });
+    await pool.withModel(largeHandle("llm-plain"), async (id) => id);
+    expect(loadConfigs[0]).toBeUndefined();
   });
 
   it("loads a model on demand and reuses it on subsequent calls", async () => {

@@ -18,6 +18,10 @@ export interface ModelHandle {
    *  infers this from `src` when src is a registry constant, so leave
    *  unset for the common case. */
   readonly type?: string;
+  /** Optional SDK modelConfig forwarded to loadModel. Used to set the LLM
+   *  context window (`{ ctx_size: 4096 }`) — QVAC defaults ctx_size to 1024,
+   *  which overflows on multi-snippet Ask prompts. */
+  readonly modelConfig?: Record<string, unknown>;
 }
 
 interface ResidentEntry {
@@ -93,8 +97,10 @@ export class ModelPool {
       const opts: {
         modelSrc: unknown;
         modelType?: string;
+        modelConfig?: Record<string, unknown>;
       } = { modelSrc: handle.src };
       if (handle.type !== undefined) opts.modelType = handle.type;
+      if (handle.modelConfig !== undefined) opts.modelConfig = handle.modelConfig;
       modelId = await loadModel(opts);
     } catch (cause) {
       throw new ModelLoadError(handle.id, cause);
