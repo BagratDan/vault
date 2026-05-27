@@ -38,6 +38,11 @@ const memoryList = z.object({
   limit: z.number().int().positive().optional(),
 });
 
+const memoryDetailReq = z.object({
+  kind: z.literal("memory.detail-get"),
+  memoryId: z.string(),
+});
+
 const memoryReindexSchema = z.object({ kind: z.literal("memory.reindex") });
 
 const entityList = z.object({
@@ -142,6 +147,7 @@ export const clientMessageShape = z.discriminatedUnion("kind", [
   searchRun,
   memoryGet,
   memoryList,
+  memoryDetailReq,
   memoryReindexSchema,
   entityList,
   entityGet,
@@ -202,6 +208,22 @@ const memoryListReply = z.object({
       folderId: z.string(),
     })
   ),
+});
+
+const memoryDetailReply = z.object({
+  kind: z.literal("memory.detail"),
+  memory: z
+    .object({
+      memoryId: z.string(),
+      summary: z.string(),
+      body: z.string(),
+      tags: z.array(z.string()),
+      createdAt: z.string(),
+      ownerPeerId: z.string(),
+      confidence: z.number(),
+      folderId: z.string(),
+    })
+    .nullable(),
 });
 
 const memoryReindexReply = z.object({
@@ -420,6 +442,7 @@ export const serverMessageShape = z.discriminatedUnion("kind", [
   captureAck,
   searchHits,
   memoryListReply,
+  memoryDetailReply,
   memoryReindexReply,
   entityResults,
   entityDetail,

@@ -373,6 +373,26 @@ async function routeMessage(
         };
       });
     }
+    case "memory.detail-get": {
+      return requireVaultActive(deps, async () => {
+        const m = await deps.getRepo().getMemory(msg.memoryId as Ulid);
+        return {
+          kind: "memory.detail",
+          memory: m
+            ? {
+                memoryId: m.id,
+                summary: m.summary,
+                body: m.body,
+                tags: m.tags,
+                createdAt: m.createdAt,
+                ownerPeerId: m.ownerPeerId,
+                confidence: m.confidence,
+                folderId: m.folderId,
+              }
+            : null,
+        };
+      });
+    }
     case "memory.list": {
       return requireVaultActive(deps, async () => {
         const all = await deps.getRepo().listMemories();

@@ -20,6 +20,7 @@ export type ClientMessage =
       folderIds?: string[];
     }
   | { kind: "memory.get"; memoryId: string }
+  | { kind: "memory.detail-get"; memoryId: string }
   | { kind: "memory.list"; limit?: number }
   | { kind: "memory.reindex" }
   | { kind: "entity.list"; entityKind: "person" | "place" | "event" | "task" }
@@ -86,6 +87,19 @@ export type ServerMessage =
         confidence: number;
         folderId: string;
       }>;
+    }
+  | {
+      kind: "memory.detail";
+      memory: {
+        memoryId: string;
+        summary: string;
+        body: string;
+        tags: string[];
+        createdAt: string;
+        ownerPeerId: string;
+        confidence: number;
+        folderId: string;
+      } | null;
     }
   | { kind: "memory.reindex"; memories: number; embedded: number; errors: number }
   | { kind: "entity.results"; entityKind: "person" | "place" | "event" | "task"; items: Array<Record<string, unknown>> }
