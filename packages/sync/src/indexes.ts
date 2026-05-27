@@ -1,4 +1,5 @@
 interface View {
+  get(key: string): Promise<{ value: unknown } | null>;
   createReadStream(opts: {
     gte?: string;
     lt?: string;
@@ -103,6 +104,38 @@ export class Indexes {
       const relId = decodeURIComponent(node.key.slice(prefix.length));
       const v = node.value as { fromId: string; type: string };
       out.push({ relId, fromId: v.fromId, type: v.type });
+    }
+    return out;
+  }
+
+  async indexMeta(
+    memoryId: string,
+    meta: {
+      tags: readonly string[];
+      ownerPeerId: string;
+      createdAt: string;
+      personIds: readonly string[];
+    }
+  ): Promise<void> {
+    await this.append({
+      kind: "meta",
+      key: `meta/${memoryId}`,
+      value: {
+        tags: meta.tags.join(","),
+        ownerPeerId: meta.ownerPeerId,
+        createdAt: meta.createdAt,
+        personIds: meta.personIds.join(","),
+      },
+    });
+  }
+
+  async metaForMemories(
+    memoryIds: readonly string[]
+  ): Promise<Map<string, Record<string, string>>> {
+    const out = new Map<string, Record<string, string>>();
+    for (const id of memoryIds) {
+      const node = await this.view.get(`meta/${id}`);
+      if (node) out.set(id, node.value as Record<string, string>);
     }
     return out;
   }

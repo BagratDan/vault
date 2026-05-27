@@ -14,6 +14,9 @@ function makeIndexes() {
         yield { key, value: store.get(key) };
       }
     },
+    async get(key: string) {
+      return store.has(key) ? { value: store.get(key) } : null;
+    },
   };
   const append = async (op: unknown) => {
     const o = op as { key: string; value: unknown };
@@ -41,5 +44,25 @@ describe("folder index", () => {
     await indexes.indexFolderMembership("FOLDER2", "MEM3");
     expect((await indexes.memoryIdsForFolder("FOLDER1")).sort()).toEqual(["MEM1", "MEM2"]);
     expect(await indexes.memoryIdsForFolder("FOLDER2")).toEqual(["MEM3"]);
+  });
+});
+
+describe("metadata side-index", () => {
+  it("stores and batch-loads memory metadata as string fields", async () => {
+    const { indexes } = makeIndexes();
+    await indexes.indexMeta("MEM1", {
+      tags: ["a", "b"],
+      ownerPeerId: "PEER1",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      personIds: ["P1", "P2"],
+    });
+    const map = await indexes.metaForMemories(["MEM1", "MISSING"]);
+    expect(map.get("MEM1")).toEqual({
+      tags: "a,b",
+      ownerPeerId: "PEER1",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      personIds: "P1,P2",
+    });
+    expect(map.has("MISSING")).toBe(false);
   });
 });
