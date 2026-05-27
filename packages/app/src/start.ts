@@ -85,6 +85,7 @@ export async function startVault(): Promise<VaultHandle> {
 
   let consentState: ConsentState | null = null;
   let audit: AuditLog | null = null;
+  let consentScanHandle: ReturnType<typeof setInterval> | null = null;
 
   // The RPC handler dispatches inbound RPC messages from connected peers.
   // Currently: search.probe (federated search). Plan 3 will add consent.request.
@@ -217,6 +218,71 @@ export async function startVault(): Promise<VaultHandle> {
       }
     };
 
+    // Consent requests arrive as replicated `consentReq/*` records (not RPCs),
+    // and Autobee exposes no per-record event, so the owner discovers them by
+    // scanning its own view on a tick + on peer connect. Each unexpired,
+    // not-yet-handled request addressed to us queues exactly one prompt.
+    const handledRequests = new Set<string>();
+    async function scanConsentRequests(): Promise<void> {
+      if (!runtime.store || !consentState) return;
+      const selfKey = runtime.state?.selfPeerId ?? identity.peerId;
+      const repo = getRepo();
+      for await (const node of runtime.store.view.createReadStream({
+        gte: "consentReq/",
+        lt: "consentReq/~",
+      })) {
+        const r = node.value as {
+          id: string;
+          ownerPeerId: string;
+          requesterPeerId: string;
+          memoryId: string;
+          scope: "metadata" | "snippet" | "file";
+          requesterDisplayName: string;
+          expiresAt: string;
+        };
+        if (!r || r.ownerPeerId !== selfKey) continue; // not ours to answer
+        if (handledRequests.has(r.id)) continue;
+        if (Date.parse(r.expiresAt) <= Date.now()) {
+          handledRequests.add(r.id);
+          continue;
+        }
+        const memory = await repo.getMemory(r.memoryId as never);
+        handledRequests.add(r.id);
+        if (!memory) continue;
+        consentState.set({
+          consentRequestId: r.id,
+          requesterPeerId: r.requesterPeerId,
+          ownerPeerId: selfKey,
+          memoryId: r.memoryId,
+          scope: r.scope,
+          requesterDisplayName: r.requesterDisplayName,
+          requestedAt: new Date().toISOString(),
+        });
+        const ratePolicy = rateLimiter.record(r.requesterPeerId);
+        broadcastToClients({
+          kind: "consent.incoming",
+          consentRequestId: r.id,
+          requesterPeerId: r.requesterPeerId,
+          requesterDisplayName: r.requesterDisplayName,
+          memoryId: r.memoryId,
+          memoryTitle: memory.summary ?? r.memoryId,
+          scope: r.scope,
+          expiresAt: Date.now() + 5 * 60 * 1000,
+          ratePolicy,
+        });
+        await writeAudit({
+          requesterPeerId: r.requesterPeerId,
+          ownerPeerId: selfKey,
+          resourceId: r.memoryId,
+          kind: "request",
+        });
+      }
+    }
+    if (consentScanHandle) clearInterval(consentScanHandle);
+    consentScanHandle = setInterval(() => {
+      void scanConsentRequests();
+    }, 1500);
+
     const swarm = new SwarmTransport(
       (peerId, method, params) => rpcHandler(peerId, method, params),
       {
@@ -225,6 +291,8 @@ export async function startVault(): Promise<VaultHandle> {
             kind: "peer.connected",
             peer: { peerId, displayName: peerId.slice(0, 8) },
           });
+          // A fresh connection may have replicated new consent requests for us.
+          void scanConsentRequests();
           // Members send a signed MemberClaim on first connect so the
           // admin can admit them. The store's local key is the writer
           // identity; we sign with it.
@@ -485,6 +553,7 @@ export async function startVault(): Promise<VaultHandle> {
     peerId: identity.peerId,
     authToken,
     close: async () => {
+      if (consentScanHandle) clearInterval(consentScanHandle);
       await server.close();
       if (runtime.swarm) await runtime.swarm.close();
       if (runtime.folderLocal) await runtime.folderLocal.close();

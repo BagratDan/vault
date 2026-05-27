@@ -131,13 +131,24 @@ function requireConsent(deps: BridgeDeps): {
 
 function buildConsentDeps(deps: BridgeDeps): ConsentDeps {
   const { consentState, audit } = requireConsent(deps);
+  const store = deps.runtime.store;
   return {
     swarm: deps.runtime.swarm,
     consentState,
     audit,
     getRepo: deps.getRepo,
-    selfPeerId: deps.identity.peerId,
+    // The requester id MUST be the autobee writer key — apply() binds the
+    // consentRequest record's requesterPeerId to the writer, and the grant
+    // routes to the writer-key connection. identity.peerId would be silently
+    // dropped by apply() (two-peerId gotcha).
+    selfPeerId: store?.localPeerId ?? deps.identity.peerId,
     selfDisplayName: deps.selfDisplayName(),
+    appendRecord: async (op: unknown) => {
+      if (!store) throw new Error("vault not active");
+      await store.append(op);
+    },
+    signRecord: (body: unknown) =>
+      store ? signCanonical(body, store.secretKey) : "",
   };
 }
 

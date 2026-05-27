@@ -10,9 +10,16 @@ function makeDeps(opts: {
   connectedPeers?: string[];
   memory?: { body: string; tags: string[]; requestableScopes: ("metadata" | "snippet" | "file")[]; createdAt: string } | null;
   sendConsentImpl?: (peerId: string, payload: unknown) => Promise<void>;
-}): { deps: ConsentDeps; appended: unknown[]; sent: Array<{ peerId: string; payload: unknown }> } {
+  appendImpl?: (op: unknown) => Promise<void>;
+}): {
+  deps: ConsentDeps;
+  appended: unknown[];
+  sent: Array<{ peerId: string; payload: unknown }>;
+  records: unknown[];
+} {
   const appended: unknown[] = [];
   const sent: Array<{ peerId: string; payload: unknown }> = [];
+  const records: unknown[] = [];
   const audit = {
     append: async (e: unknown) => { appended.push(e); },
   } as unknown as ConsentDeps["audit"];
@@ -33,39 +40,38 @@ function makeDeps(opts: {
     getRepo: () => repo,
     selfPeerId: PK_A,
     selfDisplayName: "Marcus",
+    appendRecord: opts.appendImpl ?? (async (op: unknown) => { records.push(op); }),
+    signRecord: () => "sig-fixed",
   };
-  return { deps, appended, sent };
+  return { deps, appended, sent, records };
 }
 
 describe("consentRequest", () => {
-  it("expires immediately when owner is offline", async () => {
-    const { deps, appended } = makeDeps({ connectedPeers: [] });
-    const res = await consentRequest(deps, { memoryId: MEM_ID, ownerPeerId: PK_B, scope: "snippet" });
-    expect(res.status).toBe("expired");
-    expect(res.reason).toBe("owner-offline");
-    expect(appended).toHaveLength(2); // request + expire
-    deps.consentState.dispose();
-  });
-
-  it("sends a ConsentRequest when owner is connected", async () => {
-    const { deps, appended, sent } = makeDeps({ connectedPeers: [PK_B] });
+  it("appends a signed consentRequest record to the Autobee log (owner offline or not)", async () => {
+    // No connected peer needed — the request rides the replicated log.
+    const { deps, appended, records } = makeDeps({ connectedPeers: [] });
     const res = await consentRequest(deps, { memoryId: MEM_ID, ownerPeerId: PK_B, scope: "snippet" });
     expect(res.status).toBe("pending");
-    expect(sent).toHaveLength(1);
-    expect((sent[0]!.payload as { method: string }).method).toBe("consent.request");
-    expect(appended).toHaveLength(1); // request only
+    expect(records).toHaveLength(1);
+    const op = records[0] as { kind: string; key: string; value: { kind: string; requesterPeerId: string; ownerPeerId: string; sig: string } };
+    expect(op.kind).toBe("consentRequest");
+    expect(op.key).toMatch(/^consentReq\//);
+    expect(op.value.kind).toBe("consentRequest");
+    expect(op.value.requesterPeerId).toBe(PK_A); // our writer key
+    expect(op.value.ownerPeerId).toBe(PK_B);
+    expect(op.value.sig).toBe("sig-fixed");
+    expect(appended).toHaveLength(1); // request audit only — no expire
     deps.consentState.dispose();
   });
 
-  it("audits an expire when sendConsent throws", async () => {
+  it("expires + audits when the append fails", async () => {
     const { deps, appended } = makeDeps({
-      connectedPeers: [PK_B],
-      sendConsentImpl: async () => { throw new Error("boom"); },
+      appendImpl: async () => { throw new Error("boom"); },
     });
     const res = await consentRequest(deps, { memoryId: MEM_ID, ownerPeerId: PK_B, scope: "snippet" });
     expect(res.status).toBe("expired");
     expect(res.reason).toBe("boom");
-    expect(appended).toHaveLength(2);
+    expect(appended).toHaveLength(2); // request + expire
     deps.consentState.dispose();
   });
 });

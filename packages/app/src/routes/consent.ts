@@ -2,7 +2,6 @@ import crypto from "node:crypto";
 import { newUlid, type ConsentEvent } from "@vault/domain";
 import {
   isScopeAllowed,
-  type ConsentRequest,
   type ConsentResponse,
   type Scope,
   type SwarmTransport,
@@ -22,6 +21,10 @@ export interface ConsentDeps {
   getRepo: () => Repo;
   selfPeerId: string;
   selfDisplayName: string;
+  /** Append an Op to the Autobee log (consent requests ride the shared log). */
+  appendRecord: (op: unknown) => Promise<void>;
+  /** Sign a record body with this peer's autobee writer secret key. */
+  signRecord: (body: unknown) => string;
 }
 
 // ── consent.request (requester side) ────────────────────────────────────
@@ -43,7 +46,8 @@ export async function consentRequest(
   input: ConsentRequestInput
 ): Promise<ConsentRequestResult> {
   const consentRequestId = newUlid();
-  const ts = new Date().toISOString();
+  const now = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
 
   await writeAudit(deps.audit, {
     requesterPeerId: deps.selfPeerId,
@@ -52,27 +56,31 @@ export async function consentRequest(
     kind: "request",
   });
 
-  if (!deps.swarm || !deps.swarm.listConnectedPeers().includes(input.ownerPeerId)) {
-    await writeAudit(deps.audit, {
-      requesterPeerId: deps.selfPeerId,
-      ownerPeerId: input.ownerPeerId,
-      resourceId: input.memoryId,
-      kind: "expire",
-    });
-    return { consentRequestId, status: "expired", reason: "owner-offline" };
-  }
-
-  const wireReq: ConsentRequest = {
-    v: 1,
-    method: "consent.request",
-    consentRequestId,
+  // Consent requests ride the shared Autobee log (not a point-to-point RPC):
+  // the request carries no document content, so replicating it to the roster
+  // is safe, and the owner discovers it by scanning its own view — no peer
+  // lookup, so no false "owner-offline" from the old peer-key mismatch.
+  // apply() roster-gates the record and binds requesterPeerId to the writer.
+  const recBody = {
+    id: consentRequestId,
+    createdAt: now,
+    updatedAt: now,
+    ownerPeerId: input.ownerPeerId, // memory owner's writer key — the routing target
+    provenance: { kind: "user" as const },
+    kind: "consentRequest" as const,
+    requesterPeerId: deps.selfPeerId, // our autobee writer key
     memoryId: input.memoryId,
     scope: input.scope,
     requesterDisplayName: deps.selfDisplayName,
-    ts,
+    expiresAt,
   };
+  const rec = { ...recBody, sig: deps.signRecord(recBody) };
   try {
-    await deps.swarm.sendConsent(input.ownerPeerId, wireReq);
+    await deps.appendRecord({
+      kind: "consentRequest",
+      key: `consentReq/${consentRequestId}`,
+      value: rec,
+    });
   } catch (err) {
     await writeAudit(deps.audit, {
       requesterPeerId: deps.selfPeerId,
@@ -83,7 +91,7 @@ export async function consentRequest(
     return {
       consentRequestId,
       status: "expired",
-      reason: err instanceof Error ? err.message : "send-failed",
+      reason: err instanceof Error ? err.message : "append-failed",
     };
   }
   return { consentRequestId, status: "pending" };
