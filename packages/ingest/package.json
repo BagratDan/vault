@@ -13,7 +13,6 @@
   },
   "dependencies": {
     "@vault/ai": "workspace:*",
-    "@vault/domain": "workspace:*",
     "mammoth": "^1.8.0",
     "pdfjs-dist": "^4.9.155"
   },

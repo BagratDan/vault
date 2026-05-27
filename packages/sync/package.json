@@ -14,7 +14,6 @@
   },
   "dependencies": {
     "@vault/domain": "workspace:*",
-    "autobase": "^7.13.0",
     "autobee": "^1.0.0",
     "corestore": "^7.4.0",
     "hyperbee": "^2.20.0",
