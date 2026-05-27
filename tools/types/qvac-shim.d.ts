@@ -133,6 +133,7 @@ declare module "@qvac/sdk" {
   // Model registry constants Vault pins. Real shapes are complex literal
   // objects with name, src, engine, etc. — we only pass them through.
   export const LLAMA_3_2_1B_INST_Q4_0: Readonly<Record<string, unknown>>;
+  export const QWEN3_4B_INST_Q4_K_M: Readonly<Record<string, unknown>>;
   export const EMBEDDINGGEMMA_300M_Q4_0: Readonly<Record<string, unknown>>;
   export const TTS_EN_ES_CHATTERBOX_Q4F16: Readonly<Record<string, unknown>>;
   export const PARAKEET_TDT_ENCODER_INT8: Readonly<Record<string, unknown>>;
