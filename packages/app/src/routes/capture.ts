@@ -40,18 +40,18 @@ async function writeEdge(
   toId: string,
   type: Relationship["type"]
 ): Promise<void> {
-  const t = new Date().toISOString();
-  const rel: Relationship = {
-    id: newUlid(),
-    createdAt: t,
-    updatedAt: t,
-    ownerPeerId: deps.ownerPeerId,
-    provenance: { kind: "extraction" },
-    fromId: asUlid(fromId),
-    toId: asUlid(toId),
-    type,
-  };
   try {
+    const t = new Date().toISOString();
+    const rel: Relationship = {
+      id: newUlid(),
+      createdAt: t,
+      updatedAt: t,
+      ownerPeerId: deps.ownerPeerId,
+      provenance: { kind: "extraction" },
+      fromId: asUlid(fromId),
+      toId: asUlid(toId),
+      type,
+    };
     await deps.repo.putRelationship(rel);
     await deps.indexes.indexRelationship(rel.id, fromId, toId, type);
   } catch (err) {
@@ -183,13 +183,17 @@ export async function captureText(
   // folder and always go through the autobee putMemory path above, so indexing
   // here mirrors the autobee storage tier (unlike runIngest, which gates these
   // by visibility). No visibility guard needed.
-  await deps.indexes.indexFolderMembership(ext.memory.folderId, ext.memory.id);
-  await deps.indexes.indexMeta(ext.memory.id, {
-    tags: allTags,
-    ownerPeerId: ext.memory.ownerPeerId,
-    createdAt: ext.memory.createdAt,
-    personIds: ext.people.map((p) => p.id),
-  });
+  try {
+    await deps.indexes.indexFolderMembership(ext.memory.folderId, ext.memory.id);
+    await deps.indexes.indexMeta(ext.memory.id, {
+      tags: allTags,
+      ownerPeerId: ext.memory.ownerPeerId,
+      createdAt: ext.memory.createdAt,
+      personIds: ext.people.map((p) => p.id),
+    });
+  } catch (err) {
+    console.warn(`[vault] dropping folder/meta index for ${ext.memory.id}:`, err);
+  }
 
   // 7. Chunk + embed so long captures are searchable (a single-shot embed
   //    of the whole body overflows EmbeddingGemma's 1024-token limit).
