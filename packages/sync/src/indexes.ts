@@ -57,6 +57,56 @@ export class Indexes {
     return this.listIds(`idx/person/${encodeSegment(personId)}/`);
   }
 
+  async indexRelationship(
+    relId: string,
+    fromId: string,
+    toId: string,
+    type: string
+  ): Promise<void> {
+    await this.append({
+      kind: "index",
+      key: `idx/rel/from/${encodeSegment(fromId)}/${encodeSegment(relId)}`,
+      value: { toId, type },
+    });
+    await this.append({
+      kind: "index",
+      key: `idx/rel/to/${encodeSegment(toId)}/${encodeSegment(relId)}`,
+      value: { fromId, type },
+    });
+  }
+
+  async relationshipsFrom(
+    fromId: string
+  ): Promise<{ relId: string; toId: string; type: string }[]> {
+    const prefix = `idx/rel/from/${encodeSegment(fromId)}/`;
+    const out: { relId: string; toId: string; type: string }[] = [];
+    for await (const node of this.view.createReadStream({
+      gte: prefix,
+      lt: prefix + "~",
+    })) {
+      const relId = decodeURIComponent(node.key.slice(prefix.length));
+      const v = node.value as { toId: string; type: string };
+      out.push({ relId, toId: v.toId, type: v.type });
+    }
+    return out;
+  }
+
+  async relationshipsTo(
+    toId: string
+  ): Promise<{ relId: string; fromId: string; type: string }[]> {
+    const prefix = `idx/rel/to/${encodeSegment(toId)}/`;
+    const out: { relId: string; fromId: string; type: string }[] = [];
+    for await (const node of this.view.createReadStream({
+      gte: prefix,
+      lt: prefix + "~",
+    })) {
+      const relId = decodeURIComponent(node.key.slice(prefix.length));
+      const v = node.value as { fromId: string; type: string };
+      out.push({ relId, fromId: v.fromId, type: v.type });
+    }
+    return out;
+  }
+
   private async listIds(prefix: string): Promise<string[]> {
     const out: string[] = [];
     for await (const node of this.view.createReadStream({
