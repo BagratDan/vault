@@ -89,7 +89,18 @@ declare module "@qvac/sdk" {
   // The "segregated flow" (chunk → embed → saveEmbeddings) is the only
   // path that lets us pass our own document ids and metadata; ragIngest
   // string-mode auto-generates ids which doesn't fit Vault's memoryId
-  // contract.
+  // contract. ragIngest is also exposed for workspace migration (re-ingest
+  // all bodies into a fresh workspace).
+  export function ragIngest(opts: {
+    workspace?: string;
+    modelId: string;
+    documents: string | string[];
+    chunk?: boolean;
+  }): Promise<{
+    processed: Array<{ status: "fulfilled" | "rejected"; id?: string; error?: string }>;
+    droppedIndices: number[];
+  }>;
+
   export interface RagEmbeddedDoc {
     id: string;
     content: string;
