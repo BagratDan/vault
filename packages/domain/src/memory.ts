@@ -9,7 +9,11 @@ export const memoryShape = baseRecordShape.extend({
   body: z.string(),
   sourceRecordId: ulidShape,
   confidence: z.number().min(0).max(1),
-  tags: z.array(z.string().refine((t) => !t.includes(","), "tags may not contain commas")),
+  tags: z.array(
+    z.string().refine((t) => !t.includes(","), {
+      error: (issue) => `tag "${issue.input as string}" may not contain commas`,
+    })
+  ),
   requestableScopes: z.array(requestableScopeShape),
   folderId: ulidShape,
 });

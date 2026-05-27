@@ -125,14 +125,18 @@ export class Repo {
   }
 
   /** One-time, idempotent backfill of folder + meta indexes for existing
-   *  public memories. Edge backfill is intentionally skipped: pre-existing
-   *  memories lack persisted entity ids to link, so edges are only written
-   *  for new captures going forward. */
+   *  public memories. A sentinel key short-circuits the already-complete
+   *  path in O(1); the per-memory skip below still allows safe resume if a
+   *  prior run was interrupted before the sentinel was written. Edge backfill
+   *  is intentionally skipped: pre-existing memories lack persisted entity ids
+   *  to link, so edges are only written for new captures going forward. */
   async backfillIndexes(indexes: Indexes): Promise<void> {
+    const sentinel = await this.view.get("meta/__backfill_v1");
+    if (sentinel) return; // fully backfilled on a prior run — O(1) fast path
     const memories = await this.listMemories();
     for (const m of memories) {
       const existing = await indexes.metaForMemories([m.id]);
-      if (existing.has(m.id)) continue; // already backfilled
+      if (existing.has(m.id)) continue; // already indexed — resume safety
       await indexes.indexFolderMembership(m.folderId, m.id);
       await indexes.indexMeta(m.id, {
         tags: m.tags,
@@ -141,6 +145,8 @@ export class Repo {
         personIds: [],
       });
     }
+    // Mark complete so subsequent activations skip the per-memory scan.
+    await this.append({ kind: "meta", key: "meta/__backfill_v1", value: { done: true } });
   }
 
   // Folder (PUBLIC subset, synced) ----------------------------------------

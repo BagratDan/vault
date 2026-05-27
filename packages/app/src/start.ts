@@ -86,6 +86,8 @@ export async function startVault(): Promise<VaultHandle> {
   let consentState: ConsentState | null = null;
   let audit: AuditLog | null = null;
   let consentScanHandle: ReturnType<typeof setInterval> | null = null;
+  // Guard so the (idempotent) index backfill runs at most once per process
+  // start, avoiding the listMemories scan on repeated activateVault calls.
   let backfillDone = false;
 
   // The RPC handler dispatches inbound RPC messages from connected peers.

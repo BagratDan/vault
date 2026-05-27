@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { Repo } from "../src/repo.js";
 import { Indexes } from "../src/indexes.js";
 import { newUlid } from "@vault/domain";
@@ -49,8 +49,11 @@ describe("Repo.backfillIndexes", () => {
     expect(await indexes.memoryIdsForFolder(mem.folderId)).toContain(mem.id);
     expect((await indexes.metaForMemories([mem.id])).has(mem.id)).toBe(true);
 
-    // idempotent: second run doesn't duplicate / doesn't throw
+    // idempotent: second run doesn't duplicate / doesn't throw, and the
+    // sentinel makes it an O(1) fast path that never re-scans memories.
+    const listSpy = vi.spyOn(repo, "listMemories");
     await repo.backfillIndexes(indexes);
+    expect(listSpy).not.toHaveBeenCalled(); // sentinel short-circuited the scan
     expect(
       (await indexes.memoryIdsForFolder(mem.folderId)).filter((x) => x === mem.id).length
     ).toBe(1);
