@@ -30,7 +30,14 @@ import {
 } from "./routes/consent.js";
 import type { ConsentState } from "./consent-state.js";
 import * as folderRoutes from "./routes/folder.js";
-import { complete, buildAnswerContext, type ChatMessage } from "@vault/ai";
+import {
+  complete,
+  buildAnswerContext,
+  buildFolderSummaryContext,
+  classifyAskIntent,
+  FOLDER_SUMMARY_SYSTEM_PROMPT,
+  type ChatMessage,
+} from "@vault/ai";
 import { newUlid, type Ulid } from "@vault/domain";
 
 /**
@@ -258,6 +265,33 @@ async function routeMessage(
                 : {}),
             }
           : undefined;
+        // Folder-scoped "summarize this folder" requests can't be answered by
+        // semantic search (the meta-instruction has no content words to match),
+        // so classify intent and, for SUMMARY, pull the folder's documents
+        // directly and synthesize an overview from their per-file summaries.
+        const onlyFolderId =
+          msg.folderIds && msg.folderIds.length === 1 ? msg.folderIds[0]! : null;
+        if (onlyFolderId) {
+          const intent = await classifyAskIntent(deps.pool, msg.query);
+          if (intent === "summary") {
+            const docs = await deps.getRepo().listMemoriesInFolder(onlyFolderId);
+            const requestId = newUlid();
+            queueMicrotask(() => {
+              void streamFolderSummary(deps, conn, requestId, onlyFolderId);
+            });
+            return {
+              kind: "search.hits",
+              hits: docs.slice(0, 8).map((d) => ({
+                memoryId: d.id,
+                score: 1,
+                snippet: d.summary || d.body.slice(0, 200),
+                ...(d.ownerPeerId ? { ownerPeerId: d.ownerPeerId } : {}),
+                tags: d.tags,
+                folderId: onlyFolderId,
+              })),
+            };
+          }
+        }
         // selfPeerId stamped on hits MUST match the peerId used in the
         // roster + vault.status reply (= the autobee writer key), so the
         // web UI can correctly compare h.ownerPeerId against selfPeerId
@@ -642,6 +676,47 @@ async function buildFolderStats(
       .join("; ");
   } catch {
     return "";
+  }
+}
+
+async function streamFolderSummary(
+  deps: BridgeDeps,
+  conn: Conn,
+  requestId: string,
+  folderId: string
+): Promise<void> {
+  const docs = await deps.getRepo().listMemoriesInFolder(folderId);
+  if (docs.length === 0) {
+    conn.send({
+      kind: "answer.chunk",
+      requestId,
+      text: "This folder has no indexed files yet.",
+    });
+    conn.send({ kind: "answer.done", requestId, citations: [] });
+    return;
+  }
+  const { context } = buildFolderSummaryContext(
+    docs.map((d) => ({ summary: d.summary, body: d.body }))
+  );
+  const messages: ChatMessage[] = [
+    { role: "system", content: FOLDER_SUMMARY_SYSTEM_PROMPT },
+    { role: "user", content: `File summaries:\n${context}\n\nWrite the folder overview.` },
+  ];
+  try {
+    const text = await complete(deps.pool, messages);
+    conn.send({ kind: "answer.chunk", requestId, text });
+    conn.send({
+      kind: "answer.done",
+      requestId,
+      citations: docs.slice(0, 4).map((d) => ({ memoryId: d.id })),
+    });
+  } catch (err) {
+    conn.send({
+      kind: "error",
+      requestId,
+      code: "answer-failed",
+      message: err instanceof Error ? err.message : "unknown",
+    });
   }
 }
 
