@@ -35,6 +35,8 @@ Type a question — *"What does the Acme contract say about liability?"* or *"Su
 
 You can ask across all your folders or scope the question to a single folder. You can also have the answer **read aloud** via on-device text-to-speech.
 
+Asking for a whole-folder overview — *"summarize this folder"*, *"what's in here?"* — is handled differently: instead of semantic search (which can't match a request that has no content words), Vault recognizes the summary intent, pulls the folder's documents directly, and synthesizes an overview from their per-file summaries.
+
 ### Capture quick notes
 
 Beyond folders, you can capture standalone memories by typing or by recording a voice note (push-to-talk). The LLM extracts structured entities (people, places, events, tasks) from what you captured, and near-duplicate captures are detected and linked automatically.
