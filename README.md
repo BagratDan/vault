@@ -1,367 +1,253 @@
 # Vault
 
-Peer-to-peer, consent-gated, AI-native Digital Asset Management for sensitive teams. Built as the Tether QVAC SDK Technical PM take-home (2026-05-25 → 2026-05-28).
+**A local-first, peer-to-peer, AI-native document manager for teams that can't send their data to the cloud.**
 
-This README covers what ships in **v1 (Plan 1 — Foundation)**. The full product vision and roadmap live in [docs/superpowers/specs/2026-05-25-vault-design.md](docs/superpowers/specs/2026-05-25-vault-design.md). Model and engine tradeoffs are in [MODEL_TRADEOFFS.md](MODEL_TRADEOFFS.md). The security posture and residual risks are in [THREAT_MODEL.md](THREAT_MODEL.md).
+Vault lets you point your computer at folders of real documents — contracts, notes, recordings — and then ask questions about them in plain language. The answers come from a language model that runs entirely on your own machine. Nothing is uploaded. When you work with teammates, your devices sync directly to each other over an encrypted peer-to-peer network, and every cross-device read is gated by an explicit, time-limited consent prompt.
 
-## What it does (v1)
+Built on Tether's [QVAC SDK](https://docs.tether.io) (on-device LLM, speech-to-text, text-to-speech, embeddings, and vector search) and the Holepunch stack (Hypercore / Hyperbee / Autobee / Hyperswarm) for storage and sync.
 
-A local-first personal recall app. Run the sidecar, open the web UI, and:
+> **Companion docs:** [MODEL_TRADEOFFS.md](MODEL_TRADEOFFS.md) (why each AI model was chosen) · [THREAT_MODEL.md](THREAT_MODEL.md) (security posture and residual risks) · [docs/superpowers/specs/2026-05-25-vault-design.md](docs/superpowers/specs/2026-05-25-vault-design.md) (full design spec).
 
-- **Capture memories** by typing, recording (push-to-talk), or importing an audio file.
-- **Query in natural language** — "what did Sarah promise about the migration?" — and get an answer grounded in source snippets with citations.
-- **Hear the answer** via streaming TTS (optional).
-- **Filter** results by tag, owner, person, or date range.
-- All inference runs locally through `@qvac/sdk`. No hosted APIs. No telemetry. No phone-home.
+---
 
-The full v1 spec also describes a per-firm Vault with signed-invite membership, federated fan-out search, consent-gated cross-node access, and a tamper-evident audit log. **Plan 1 ships the foundation — single-node only.** Multi-peer Autobee sync and the consent protocol are scoped to Plan 2 and Plan 3 respectively. See [Known limitations](#known-limitations) below for what this means for the take-home prompt.
+## What you can do with it
 
-## Setup
+### Organize folders of documents
+
+Point Vault at any folder under your home directory. It walks the folder, reads every supported file, and makes the contents searchable. Supported formats:
+
+- **PDF** (text-layer extraction via `pdfjs-dist`)
+- **Word** (`.docx` via `mammoth`)
+- **Plain text & Markdown** (`.txt`, `.md`)
+- **Audio** (`.mp3`, `.wav`, `.m4a`, `.flac`, `.ogg`) — automatically transcribed on-device with the Parakeet speech model, then indexed like any text document.
+
+Each folder is marked **public** or **private**. Public folders are searchable by teammates you've admitted (subject to the consent gate below). Private folders never leave your machine — not even in encrypted form — and are physically stored in a separate local-only database.
+
+The raw file bytes always stay on your disk. Only when a teammate explicitly requests a file *and you approve* does the content cross the wire.
+
+### Ask questions in natural language
+
+Type a question — *"What does the Acme contract say about liability?"* or *"Summarize the Q3 planning notes"* — and Vault:
+
+1. Embeds your question and runs semantic search across the indexed documents.
+2. Pulls the most relevant passages.
+3. Feeds them to a local LLM, which writes a grounded answer with inline `[1]`, `[2]` citations back to the source documents.
+
+You can ask across all your folders or scope the question to a single folder. You can also have the answer **read aloud** via on-device text-to-speech.
+
+### Capture quick notes
+
+Beyond folders, you can capture standalone memories by typing or by recording a voice note (push-to-talk). The LLM extracts structured entities (people, places, events, tasks) from what you captured, and near-duplicate captures are detected and linked automatically.
+
+### Work with a team — privately
+
+Vault is multi-device by design, with no central server:
+
+1. One person **creates a Vault** and becomes its admin.
+2. The admin **issues an invite token** (a signed string) and shares it however they like — Signal, AirDrop, a sticky note.
+3. A teammate **pastes the token** and is admitted as a member.
+4. Devices **discover each other** over the Hyperswarm DHT and sync directly, peer-to-peer.
+
+Once connected, a search runs across everyone's public folders. But — and this is the point — **a teammate never silently reads your documents.** Their search returns only a blurred preview (first word + redaction). To see the real content they must click "Request access," which pops a **consent prompt on your device**: Snippet / Full file / Deny, with a 5-minute countdown. Every request and decision is written to a tamper-evident **audit log** you can review. Admins can revoke a member at any time, and revoked devices are immediately locked out of the shared state.
+
+---
+
+## Quick start
 
 ### Prerequisites
 
-- **Node.js 22.17+** (the `engines` field in `package.json` enforces this; `.nvmrc` pins `22.17.0`).
-- **pnpm 9.12+** (`corepack enable && corepack prepare pnpm@9.12.0 --activate`, or install directly).
-- **Apple Silicon or NVIDIA consumer GPU** — `@qvac/sdk` v0.11.0 ships native bindings for these targets. The build was developed on Apple Silicon.
-- **~3.5 GB free disk** for the `@qvac/sdk` transitive native binaries (llama.cpp, whisper.cpp, ONNX runtimes via the `bare-*` Holepunch ecosystem). Model files download on first inference: roughly 700 MB for Llama 3.2 1B Q4_0 + 150 MB for EmbeddingGemma + ~75 MB for the Parakeet TDT INT8 quad + ~80 MB for Chatterbox Q4F16.
+- **Node.js 22.17+** (`.nvmrc` pins `22.17.0`; `package.json` `engines` enforces it).
+- **pnpm 9.12+** — `corepack enable && corepack prepare pnpm@9.12.0 --activate`.
+- **Apple Silicon or an NVIDIA consumer GPU** — `@qvac/sdk` v0.11.0 ships native bindings for these. Developed and tested on Apple Silicon (M4).
+- **~3.5 GB free disk** for the native AI binaries (llama.cpp / whisper.cpp / ONNX via the `bare-*` Holepunch ecosystem) plus model files. Models download on first use: ~700 MB (LLM) + ~150 MB (embeddings) + ~75 MB (speech-to-text) + ~80 MB (text-to-speech).
 
-### Install
-
-```bash
-git clone <repo-url> vault
-cd vault
-nvm use            # respects .nvmrc → 22.17.0
-pnpm install       # installs all workspace deps including @qvac/sdk
-pnpm -r build      # builds all packages
-```
-
-### Run
-
-The sidecar serves a loopback HTTP+WebSocket server on `127.0.0.1:7421`. The Vite dev server serves the web UI on `127.0.0.1:5173` and proxies `/ws`, `/token`, and `/healthz` through.
-
-In one terminal:
+### Install and run
 
 ```bash
+git clone <repo-url> vault && cd vault
+nvm use            # → Node 22.17.0
+pnpm install
+pnpm -r build
+
+# Terminal 1 — the sidecar (backend + AI)
 pnpm dev
-```
 
-This runs `pnpm --filter @vault/app dev` — boots the sidecar with `tsx watch`. On first launch it generates an Ed25519 identity (stored at `~/.vault/identity/keypair.json`, mode 0600) and a per-launch WS auth token (`~/.vault/.ws-token`).
-
-In a second terminal, start the web UI:
-
-```bash
+# Terminal 2 — the web UI
 pnpm --filter @vault/web dev
 ```
 
-Then open <http://127.0.0.1:5173/>.
+Open **<http://127.0.0.1:5173/>**.
 
-**First run downloads models** the moment you capture or query. Expect 30–90 seconds on a fresh install. Subsequent launches are instant.
+On first launch the sidecar generates your Ed25519 identity (`~/.vault/identity/keypair.json`, mode `0600`) and a per-launch WebSocket auth token. The first time you capture or ask something, models download in the background (30–90 seconds on a fresh install); after that, launches are instant.
 
-### Production-style launch (with Node permission model)
+### Trying it out
 
-The sidecar can run under Node's experimental permission model for an extra defense-in-depth layer:
+1. Click **Add folder**, paste an absolute path under your home directory (e.g. `/Users/you/Documents/Contracts`), give it a name, leave it Public, and Add.
+2. Watch the ingest progress bar as Vault reads and indexes each file.
+3. Open the folder and **Ask** a question about its contents.
+4. To try the team flow, run a second instance on another machine, create the Vault on the first, issue an invite, and paste it on the second.
+
+Step-by-step demo scripts: [docs/DEMO_PLAN_2.md](docs/DEMO_PLAN_2.md) (multi-device), [docs/DEMO_PLAN_3.md](docs/DEMO_PLAN_3.md) (consent), [docs/DEMO_PLAN_4.md](docs/DEMO_PLAN_4.md) (folders).
+
+### Hardened launch (optional)
+
+The sidecar can run under Node's experimental permission model for defense-in-depth:
 
 ```bash
 node --permission \
-  --allow-fs-read=$HOME/.vault \
-  --allow-fs-write=$HOME/.vault \
+  --allow-fs-read=$HOME/.vault --allow-fs-write=$HOME/.vault \
   --allow-fs-read=$(pnpm root) \
   --allow-net=hyperdht.org,dht1.hyperdht.org \
   packages/app/dist/index.js
 ```
 
-This is documented under "Trust posture" in the threat model.
+See "Trust posture" in [THREAT_MODEL.md](THREAT_MODEL.md).
 
-## Run with mocked AI (no model download)
+### Running without downloading models
 
-For demos and CI, the AI layer can be swapped for a typed mock via a Node ESM loader hook:
+For demos and CI the AI layer can be swapped for a deterministic typed mock via a Node ESM loader hook:
 
 ```bash
 VAULT_QVAC_MOCK=1 VAULT_ROOT=/tmp/vault-mock \
   pnpm --filter @vault/app exec tsx --import=./tests/qvac-mock/register.js src/index.ts
 ```
 
-The mock returns deterministic completions (used by the E2E in `e2e/tests/e2e1-literal-prompt.spec.ts`). The loader is inert without the explicit `--import=...` flag and the environment variable; production `node dist/index.js` cannot accidentally activate it.
+The hook is inert without both the env var and the explicit `--import` flag, so a normal `node dist/index.js` can never accidentally activate it.
+
+---
+
+## How it's built
+
+Vault is a single backend process (the **sidecar**) that the browser UI talks to over an authenticated, loopback-only WebSocket. The sidecar owns all storage, all AI inference, and all networking. The browser holds no secrets and makes no network calls of its own.
+
+```text
+┌─────────────┐   WebSocket    ┌────────────────────────────────────────┐
+│  Web UI     │◀──(loopback,──▶│  Sidecar (Node)                        │
+│  React+Vite │   token-auth)  │                                        │
+└─────────────┘                │  • WS protocol + route handlers        │
+                               │  • QVAC: LLM / STT / TTS / embeddings  │
+                               │  • Hyperbee + Autobee storage          │
+                               │  • Hyperswarm P2P sync                 │
+                               └───────────────┬────────────────────────┘
+                                               │ direct, encrypted
+                                               ▼
+                                       Other peers' sidecars
+```
+
+### The data flow, end to end
+
+**Adding a folder** → the sidecar walks the directory, parses each file to text (PDF/DOCX/text/audio), and for each document: splits the text into overlapping ~2,800-character chunks (a whole document overflows the embedding model's token limit), embeds each chunk on-device, and stores the vectors in a per-peer vector workspace. One Memory record is created per file. Public-folder records replicate to teammates; private-folder records go to a separate local-only database that never syncs.
+
+**Asking a question** → the sidecar embeds the question, runs vector search (collapsing multiple chunk-hits back to one result per document), assembles a token-budgeted prompt (folder context + top passages + your question, trimmed so it can never overflow the model's context window), and streams the LLM's answer back token by token with citations. For team searches, the same query is sent to connected peers, who each run local search and return *blurred* previews until you're granted access.
+
+**Working with teammates** → invite tokens are Ed25519-signed and carry the admin's writer key plus an expiry. Membership is enforced by a deterministic `apply()` function over the shared Autobee log: only admitted, non-revoked peers can append. Every consent request, grant, denial, and expiry is recorded as an event in a per-peer audit log.
+
+### The packages
+
+Vault is a pnpm monorepo of eight focused packages with a strict, lint-enforced dependency direction — only the networking package may import network modules, so AI and storage code physically cannot phone home:
+
+```text
+  web  →  app  →  { net, domain, ai, retrieval, sync, ingest }
+                     ▲
+                     └─ ESLint rule forbids network imports outside packages/net
+```
+
+| Package | Responsibility |
+|---|---|
+| **`@vault/domain`** | Every record's shape, as Zod schemas: Memory, Person, Place, Event, Task, SourceRecord, Relationship, ExternalRef, Folder, plus the team-protocol types (Member, Invite, Revocation, ConsentEvent). The single source of truth for data validation at every boundary. |
+| **`@vault/ingest`** | Folder scanning and file parsing (PDF / DOCX / text / audio), plus the document chunker. |
+| **`@vault/ai`** | All QVAC integration: provider lifecycle, a model pool that keeps at most one large model resident, and wrappers for the LLM, embeddings, speech-to-text, and text-to-speech. Also the entity-extraction pipeline (with schema-validated retry + low-confidence fallback) and duplicate detection. |
+| **`@vault/retrieval`** | The vector index. Wraps `@qvac/rag` for embedding storage and semantic search; collapses chunked results back to documents and composes metadata filters on top. |
+| **`@vault/sync`** | Storage and the peer-to-peer protocol: Corestore + Hyperbee for records, multi-writer Autobee for shared state, the roster/`apply()` membership gate, the owner-local store for private folders, the consent protocol, the audit log, and Hyperswarm discovery. |
+| **`@vault/net`** | The loopback HTTP + WebSocket server. The *only* package allowed to import network modules. Binds `127.0.0.1` / `::1` only and refuses anything else. |
+| **`@vault/app`** | The sidecar itself: configuration, a path-confined filesystem wrapper, Ed25519 identity, the typed WebSocket protocol and its route handlers (capture, search/ask, folders, consent, admin, audit, TTS, reindex), and the process entry point. |
+| **`@vault/web`** | The React + Vite + Tailwind UI: folder list and folder view, search bar and answer card, capture pane, filter controls, the consent toast and audit/admin screens, peer list, and vault setup. |
+
+### The AI models (all on-device)
+
+| Role | Model | Notes |
+|---|---|---|
+| Answering & extraction | Llama 3.2 1B Instruct (Q4_0) | ~700 MB. Loaded with a 4,096-token context. |
+| Embeddings | EmbeddingGemma 300M (Q4_0) | Powers semantic search and duplicate detection. |
+| Speech-to-text | Parakeet TDT (INT8, 4 files) | Transcribes voice notes and audio files. |
+| Text-to-speech | Chatterbox EN-ES (Q4F16) | Reads answers aloud. |
+
+Models are pinned in [`packages/ai/src/models.ts`](packages/ai/src/models.ts). A pool keeps memory bounded — the small embedding model co-resides with whichever large model (LLM or TTS) is active, and the two large models evict each other. The full rationale, the alternatives weighed, and an evaluated-but-reverted upgrade to Qwen3 4B are documented in [MODEL_TRADEOFFS.md](MODEL_TRADEOFFS.md).
+
+### Privacy architecture in two sentences
+
+A **public** folder's records replicate to admitted teammates, and the *consent gate controls who can search and read them* — it is not at-rest encryption, so treat public-folder contents as readable by admitted peers (see [THREAT_MODEL.md](THREAT_MODEL.md) §4a). A **private** folder is protected by two independent gates: a **storage gate** (its records live only in an owner-local database, never in the synced log) and a **probe-time gate** (the code that answers teammates' searches serves only folders on a positive public-allowlist), so a private document can never leak even through a bug in one layer.
+
+### Notable engineering choices
+
+- **Two identity keys, one canonical.** Each peer has an Ed25519 *identity* key and an Autobee *writer* key. The writer key is canonical for ownership, the membership gate, and search attribution; mixing them up silently drops writes, so the codebase is careful to always stamp records with the writer key.
+- **Chunked embedding.** Large documents exceed the embedding model's 1,024-token batch limit, so each file is split into overlapping windows, embedded per-chunk, and indexed under a `<documentId>#<chunkIndex>` key; search recovers the parent document and keeps the best-scoring chunk. Re-indexing wipes and rebuilds the vector store cleanly.
+- **Prompt budgeting.** The answer prompt is assembled under a token budget (folder context + top passages + question always fit), so it can never overflow the model's context window regardless of how many passages search returns.
+- **Untrusted LLM output.** Extraction validates every entity against its schema and drops individual failures rather than aborting a capture.
+
+---
 
 ## Tests
 
-The project has unit, integration, and end-to-end tests. Run them all:
+```bash
+pnpm -r test        # full suite — 288 tests across all packages
+pnpm e2e            # end-to-end against a live sidecar (QVAC mocked)
+pnpm lint           # ESLint, incl. the custom no-network-imports rule
+pnpm typecheck      # parallel tsc --noEmit
+```
+
+Targeted runs:
 
 ```bash
-pnpm -r test        # 91 tests across 9 packages
-pnpm e2e            # 3 E2E specs against a live sidecar (mocked QVAC)
-pnpm lint           # ESLint with the custom no-network-imports-outside-net rule
-pnpm typecheck      # parallel tsc --noEmit across packages
+pnpm --filter @vault/domain test      # record schemas
+pnpm --filter @vault/ai test          # model wrappers, extraction, dedup, prompt budgeting
+pnpm --filter @vault/ingest test      # parsers + chunker
+pnpm --filter @vault/retrieval test   # vector workspace, search dedup, filters
+pnpm --filter @vault/sync test        # storage, roster/apply, consent, two-peer protocol
+pnpm --filter @vault/net test         # loopback bind, /healthz, WS auth
+pnpm --filter @vault/app test         # config, path confinement, WS bridge, routes
+pnpm --filter @vault/web test         # React components + ws-client (jsdom)
 ```
 
-### Per-package targeted runs
+**What the tests cover.** Unit tests exercise each package in isolation. The two-peer protocol is proven deterministically with an in-memory duplex pair (no real network needed). The default end-to-end suite spawns a real sidecar child process — with `@qvac/sdk` swapped for a deterministic mock at module-resolution time — and drives it over a real WebSocket, so the whole backend path (capture → search → answer → TTS, and add-folder → ingest → search) is verified without downloading gigabytes of models.
+
+A few suites need a real machine and are excluded from CI:
 
 ```bash
-pnpm --filter @vault/domain test    # 24 schema tests
-pnpm --filter @vault/ai test        # 28 wrapper + extraction + dedup tests
-pnpm --filter @vault/retrieval test # 8 workspace/search/filter/reindex tests
-pnpm --filter @vault/sync test      # 6 Hyperbee Repo + indexes tests on tmpfs
-pnpm --filter @vault/net test       # 6 sidecar tests (loopback bind, /healthz, WS auth)
-pnpm --filter @vault/app test       # 13 config/vault-fs/WS-bridge tests
-pnpm --filter @vault/web test       # 3 component + ws-client tests via jsdom
-pnpm --filter @vault/e2e test       # E2E: capture → search → answer → TTS
+pnpm e2e:multipeer   # two sidecars over a real Hyperswarm DHT (needs outbound UDP)
+pnpm e2e:consent     # full capture → request → approve → granted flow across two peers
+pnpm --filter @vault/e2e test:playwright   # browser-driven folder flow
 ```
 
-The E2E spawns a real Node child process running the sidecar with the QVAC mock loader registered, then drives it via a real WebSocket. It's the closest thing to "this stack works end-to-end" you can get without downloading 1 GB of model weights.
-
-A Playwright UI-level E2E config is committed at [e2e/playwright.config.ts](e2e/playwright.config.ts) for a future visual E2E; the directory it points to ([e2e/playwright/](e2e/playwright/README.md)) is currently empty.
-
-## Stack summary
-
-Major technology choices and why each was picked. Detailed model/engine tradeoffs are in [MODEL_TRADEOFFS.md](MODEL_TRADEOFFS.md).
-
-### Data management & storage
-
-- **Hyperbee** (single-peer in v1) for the structured record store. Holepunch primitive, append-only, prefixed keys give us indexed lookup with no full-table scans. Hand-off to Autobee for multi-writer sync is a one-package swap in Plan 2.
-- **Corestore** to manage Hypercore lifecycle and key derivation under one root directory.
-- **No ORM.** The Hyperbee API is small enough that a thin typed `Repo` over it (40 lines per entity) beats anything heavier. `@vault/sync/src/repo.ts` is the whole query layer.
-
-### Sync structure (designed; not yet wired)
-
-- One Autobee namespace per Vault (a firm, a project). Keys are prefixed by entity kind (`mem/`, `person/`, `place/`, `event/`, `task/`, `ref/`, `rel/`, `src/`). Secondary indexes live under `idx/tag/` and `idx/person/` as ID-only pointers.
-- File bodies and derived data (embeddings, OCR text, summaries) **never** sync — only records and metadata.
-- Hyperswarm DHT for discovery; per-Vault topic key bootstraps the swarm. Implemented as scaffolding only in Plan 1; wired in Plan 2.
-
-### QVAC integration
-
-- `@qvac/sdk` v0.11.0 — sole AI dependency.
-- Provider lifecycle managed by `@vault/ai/src/provider.ts` (idempotent `startQVACProvider` / `stopQVACProvider`).
-- `ModelPool` enforces the "at most one large model resident" discipline. STT and embed are small enough to co-reside; LLM and TTS evict each other on load.
-- **Ask prompt budgeting.** The LLM loads with a 4096-token context (`modelConfig: { ctx_size }` — QVAC defaults to 1024, which overflows once retrieved chunks are large). `buildAnswerContext` trims the assembled prompt (folder context + top snippets + question) to a ~3000-token budget so it can never overflow, regardless of how many chunks search returns. Per-folder file counts are injected into the context so "how many files…" style questions can be answered inline (semantic retrieval alone can't count files). (A larger Ask LLM — Qwen3 4B — was prototyped for stronger reasoning but reverted: its 2.5 GB model is impractically slow to pull over QVAC's P2P registry. The switch is a one-line change if a faster download path becomes available — see [MODEL_TRADEOFFS.md](MODEL_TRADEOFFS.md).)
-- Model registry constants pinned in `@vault/ai/src/models.ts`. Plan 1 ships Llama 3.2 1B Q4_0 / EmbeddingGemma 300M Q4_0 / Chatterbox EN-ES Q4F16 / Parakeet TDT INT8 (encoder + decoder + preprocessor + vocab). (A Qwen3 4B upgrade for the Ask LLM was prototyped + reverted — slow P2P download; see MODEL_TRADEOFFS.md.)
-- A single ambient `tools/types/qvac-shim.d.ts` works around a `@qvac/sdk` v0.11.0 `.d.ts` issue where extension-less re-exports trip NodeNext resolution. Documented in [docs/superpowers/notes/2026-05-26-qvac-spike.md](docs/superpowers/notes/2026-05-26-qvac-spike.md).
-
-### Retrieval & RAG
-
-- `@qvac/rag` (bundled with `@qvac/sdk`) for embedding storage, semantic search, and reindex/migration. We get atomic-ish parallel-workspace migration with a single SDK call per memory.
-- Per-peer workspace naming (`vault-<peerId[:6]>`) keeps each peer's index independent; this is the layout federated fan-out (Plan 3) will use.
-- Metadata filtering layered on top of `ragSearch` results — composable AND of tag, owner, person, and date-range predicates.
-
-### UI
-
-- **Vite + React 18 + Tailwind 3.4.** Tailwind 3.4 (not 4) because v4 is still under flux and our deadline doesn't allow chasing breakage; the spec lists Tailwind 4 aspirationally. Components are small (`packages/web/src/components/`, ~30–100 lines each).
-- The web UI fetches a per-launch auth token via `GET /token`, then opens an authenticated WebSocket to the sidecar. Token + Origin checks block cross-origin browser tabs from talking to the loopback sidecar.
-- TTS chunks queue into an `<audio>` element played sequentially; blob URLs are revoked after each chunk plays.
-
-### Styling
-
-- **Tailwind 3.4** utility classes; no separate CSS framework. Dark theme via `bg-slate-950` + `text-slate-100` on `<body>`.
-
-### Testing tools
-
-- **Vitest 2.1** for unit + integration. Components under jsdom via `@testing-library/react`.
-- **Playwright 1.48** committed but not yet wired to a UI E2E (see [Known limitations](#known-limitations)).
-- Custom Node ESM loader hook (`packages/app/tests/qvac-mock/loader.mjs`) for substituting `@qvac/sdk` at module-resolution time. This is what makes the live-sidecar E2E feasible without downloading 1 GB of model weights for every CI run.
-
-### Major supporting libraries
-
-| Library | Purpose | Why this one |
-|---|---|---|
-| `zod` ^4.3 | Runtime validation at every boundary | Pinned by `@qvac/sdk`; Zod 4 has cleaner discriminated-union ergonomics for our WS protocol. |
-| `ulid` ^2.3 | Sortable IDs on every record | Lexicographic order = chronological; needed for Hyperbee prefix scans. |
-| `ws` ^8.18 | WebSocket server in the sidecar | The only network dep allowed in `packages/net/`; tiny, audited. |
-| `corestore`, `hyperbee`, `hypercore` (Holepunch) | Storage primitives | Hand-picked by Tether; same stack as Keet. |
-
-## Architecture notes
-
-Full architecture is in the [design spec](docs/superpowers/specs/2026-05-25-vault-design.md). The implementation plan is at [docs/superpowers/plans/2026-05-26-vault-1-foundation.md](docs/superpowers/plans/2026-05-26-vault-1-foundation.md).
-
-Seven-package pnpm workspace with strict layering:
-
-```text
-   web   →   app   →   { net, domain, ai, retrieval, sync }
-                          ↑                       ↑
-                          └──── ESLint rule blocks network imports
-                                outside packages/net
-```
-
-- `@vault/domain` — types + Zod 4 schemas (Memory/Person/Place/Event/Task/SourceRecord/Relationship/ExternalRef + Member/Invite/Revocation/ConsentEvent).
-- `@vault/ai` — Provider lifecycle, ModelPool with hot-swap, STT/embed/LLM/TTS wrappers, extraction pipeline with Zod-retry + low-confidence fallback, cosine dedup, five typed error classes.
-- `@vault/retrieval` — `@qvac/rag` workspace per peer, search with metadata filter composition, reindex + parallel-workspace migration.
-- `@vault/sync` — Corestore + Hyperbee store, typed Repo for 8 entity kinds, secondary indexes for tags and persons. Multi-writer Autobee plumbing in Plan 2.
-- `@vault/net` — loopback HTTP+WS sidecar (refuses non-numeric-loopback hosts).
-- `@vault/app` — config, path-confined `VaultFs`, Ed25519 identity, typed WS protocol + bridge, route handlers (capture / search / memory / tts), entry point.
-- `@vault/web` — Vite + React UI.
-
-A custom ESLint rule (`tools/eslint-rules/no-network-imports-outside-net.js`) enforces that only `packages/net/` may import `node:net`, `node:http`, `node:https`, `node:tls`, `node:dgram`, `node-fetch`, `undici`, `axios`, `got` — at lint time. The rule is unit-tested.
+---
 
 ## Known limitations
 
-Honest disclosure of what's not in v1:
+Honest disclosure of what Vault does **not** do today.
 
-### Cut by design (Plan 1 = Foundation)
+**Networking.** Hyperswarm discovery needs outbound UDP, which corporate Wi-Fi and many hotel networks block; a LAN-only fallback is future work. Team search sends the plain-text *query* to admitted peers (so each can search locally) — content stays node-local, but the query itself crosses the wire.
 
-- **Multi-peer sync.** Plan 1 is single-node. The data model is Autobee-ready (records are sync-safe; file bodies and derivatives are explicitly node-local), but the actual Hyperswarm DHT + Autobee multi-writer wiring is scoped to Plan 2. The take-home prompt's "arbitrary number of synced devices" requirement is therefore unmet in v1.
-- **Consent protocol.** The Vault headline (signed invites, per-request consent gate, federated fan-out, tamper-evident audit log) is scoped to Plan 3. The domain types (`Member`, `Invite`, `Revocation`, `ConsentEvent`) and schemas are in place; the runtime is not. Plan 1 ships as personal recall.
-- **Mobile (iOS / Android).** Out of scope; documented as a v3 target.
-- **VLM / image capture.** Out of scope.
-- **Hosted-service integrations** (Jira, Slack, Notion). Out of trust scope.
+**Privacy boundary.** Replicated records (public-folder contents and typed captures) are not encrypted at rest on teammates' machines; the consent gate controls the *search and read surface*, not raw inspection of a peer's local store. Private folders are the true at-rest boundary. Flipping a folder public→private stops serving it but does not recall records already replicated — delete and re-add as private to fully re-route.
 
-### Demo limitations
+**Folders.** Re-scan is manual (no live filesystem watcher). Image-only PDFs without a text layer are skipped (no OCR). A folder is all-public or all-private (no per-person ACL). A chosen directory is flattened into one Vault folder (no nested navigation). Editing a file's content between re-indexes can leave orphan vectors that are harmless in results; a full reindex clears them.
 
-- The committed E2E (`e2e/tests/e2e1-literal-prompt.spec.ts`) exercises the **backend pipeline** end-to-end against a real sidecar with `@qvac/sdk` mocked at the Node ESM resolver level. A full browser-driven Playwright E2E is committed as `playwright.config.ts` but the spec directory is empty — wiring it required a stable headed-browser setup we deprioritized for time. The React layer is covered by jsdom component tests (`packages/web/tests/App.test.tsx`).
-- **Real-model smoke test:** the QVAC SDK installs cleanly and the typed shim is verified; an end-to-end actual-model load + completion was not run as part of CI (would require downloading ~1 GB of models per CI run). The first interactive demo will be the first time the full real-AI path executes. If a runtime issue surfaces, the model error classes in `@vault/ai/src/errors.ts` will surface it with a typed message.
+**Platform.** Desktop only (Apple Silicon / NVIDIA). No mobile. Paths are pasted rather than picked through a native dialog, because the browser's directory-picker API is gated; a desktop wrapper (Electron/Tauri) would add a native picker. No in-app file preview — granted files download.
 
-### Smaller deferred items (called out in the [code review](#code-review-outcomes) below)
+**Audit.** The audit log is a local timeline; cross-peer log verification by an admin, and retention/pruning, are future work. Consent is hard by design — every request is a fresh decision, with no "remember this."
 
-- `sig` field on `baseRecordShape`: spec asserts every record carries an owner signature; only `Invite` and `Revocation` schemas include it today. Adds a Plan-3 migration step.
-- Single Hyperbee namespace vs. spec's syncs/node-local two-bucket split: structurally one bee in v1 because there's no Autobee yet. Plan 2 will split into a synced Autobee + a local-only Hyperbee.
-- `migrateWorkspace` writes through without the spec's "atomically swap the workspace pointer in local config." The function is correct for v1's manual-trigger use; a real migration daemon is Plan-3.
-- Tailwind 4 in the spec vs. Tailwind 3.4 in the implementation — see [Stack summary](#styling).
-
-## Code review outcomes
-
-Plan 1 was reviewed across five independent axes (spec compliance, shallow bug scan, history coherence, comment invariants, security posture). The review surfaced 21 findings; 11 with confidence ≥ 60 were fixed in commit `7e0d26d`:
-
-1. **TTS playback queue** — replaced `audio.src=url+play()` overwrite with sequential queue + blob-URL revoke.
-2. **Audio bytes persisted** — `capture.audio` now writes to `VAULT_ROOT/audio/<id>.bin` via VaultFs; `audioRef` points to the real path.
-3. **WS auth** — per-launch `crypto.randomBytes(32)` token + origin check; web UI fetches via `/token` then opens an authenticated WS.
-4. **Private-key permissions** — `VaultFs.writeFile` defaults to mode 0o600; `ensureDir` uses 0o700.
-5. **`localhost` removed from ALLOWED_HOSTS** — only numeric loopback accepted.
-6. **VaultFs symlink check** — realpath walks the deepest existing ancestor to refuse symlink-based escapes.
-7. **`qvac-shim.d.ts` consolidated** to `tools/types/`.
-8. **Date filter rejects undated hits** when a date range is set.
-9. **Tags percent-encoded** before becoming Hyperbee key segments.
-10. **Transcript markers prefix the words** instead of overwriting them (spec §9.3 "kept but marked").
-11. **Cosine dedup wired** — capture queries `ragSearch` with k=1; ≥0.92 score → `Relationship{type:'duplicate-of'}` + return `duplicateOf` in `capture.ack`.
-12. **`streamAnswer` deferred via `queueMicrotask`** so `search.hits` flushes before any background `answer.chunk`.
-13. **ESLint network rule** now covers `.ts/.tsx/.js/.mjs/.cjs` in `packages/`, `tools/`, **and** `e2e/`.
-
-Findings with confidence < 60 are documented in [Known limitations](#known-limitations).
-
-## Multi-peer mode (Plan 2)
-
-Vault now supports multiple peers connected through a shared Vault. Two laptops on the same network can:
-
-1. Laptop A: create a Vault → become admin
-2. Laptop A: issue an invite token (copy to clipboard, share out-of-band)
-3. Laptop B: paste the token → become member
-4. Both laptops: see each other's memories via cross-peer federated search
-
-The sync layer is multi-writer Autobee on top of Hypercore + Hyperbee, with Hyperswarm DHT for discovery. Invite tokens are Ed25519-signed and carry the admin's writer key + expiry. The roster gates all writes via a deterministic `apply()` function — only admitted peers can append to the synced state. New peers send a signed `MemberClaim` on first connect; the admin verifies, writes a `Member` record, and the roster propagates to everyone.
-
-### Running the multipeer demo
-
-On each laptop:
-
-```bash
-pnpm install
-pnpm dev                              # terminal 1 — sidecar
-pnpm --filter @vault/web dev          # terminal 2 — web UI
-```
-
-Open <http://127.0.0.1:5173/> on each laptop. The first peer creates a Vault; the second pastes the invite token. After ~30 seconds the peer chip in the header shows both peers. Capture a memory on one laptop; search for it on the other.
-
-The full walkthrough is in [docs/DEMO_PLAN_2.md](docs/DEMO_PLAN_2.md).
-
-### Known limitations (Plan 2)
-
-- **Hyperswarm DHT requires outbound UDP.** Corporate Wi-Fi and many hotel networks block this. A LAN-only fallback (mDNS or direct-connect by IP) is documented as Plan 4 work.
-- **Federated search leaks the query.** `search.probe` ships the plain-text query to admitted peers so each can run local retrieval. Content (snippets, hits) stays node-local — only the query crosses the wire. Documented in the Plan 2 spec as accepted Plan-2 risk; the Plan 3 consent gate narrows but does not eliminate it.
-- **Revocation is data-model only.** A `Revocation` kind is replicated and the `apply()` function refuses writes from revoked peers, but the UI does not yet expose a "revoke peer" action. Plan 3 surfaces it.
-- **No consent prompts.** Admitted peers see every memory matching their query. Per-request consent gating, blurred previews, audit log, and the admin pane are scoped to Plan 3.
-
-### Multipeer test
-
-The two-process integration test (`packages/sync/tests/two-peer.test.ts`) runs in CI using an in-memory duplex pair — deterministic proof that the protocol is sound.
-
-The real-DHT test is dev-machine only (it needs outbound UDP, real model downloads, and 3+ minutes):
-
-```bash
-pnpm e2e:multipeer
-```
-
-This spawns two sidecar child processes on different ports + `VAULT_ROOT`s, joins a real Hyperswarm topic, and verifies peer admission via the `peer.list` reply.
-
-## Consent + audit + admin (Plan 3)
-
-After Plan 2 admitted peers see _every_ memory in cross-peer search. Plan 3 gates each individual read with an explicit, time-bounded prompt:
-
-- **Blurred preview** — cross-peer hits arrive with the snippet first-word + bullets (the rest of the body is redacted on the owner's side before the RPC reply leaves the node).
-- **Consent toast** — clicking "Request access" pushes a `consent.request` RPC to the memory's owner. The owner sees a slide-in toast with three buttons (Snippet / Full file / Deny), a fourth Metadata-only secondary, and a 5-minute countdown.
-- **Audit log** — every state change (request, approve, deny, expire) writes a `ConsentEvent` to a per-peer Hypercore under `${VAULT_ROOT}/audit/`. Reachable at `#/audit`.
-- **Admin pane** — `#/admin` lets the founder see the roster + revoke any member; revoked peers' subsequent writes are dropped by `apply()`.
-- **Rate-limit warning** — sliding-window counter (default: 12 / 10 min); the toast shows a yellow banner once the count crosses 8.
-- **Scope ceiling per memory** — at capture time the user chooses which scopes (metadata / snippet / file) are askable. Owner-side `respond` short-circuits to deny if a request exceeds the ceiling.
-
-### Running the consent demo
-
-On each laptop, the Plan 2 setup applies (`pnpm install && pnpm dev`). Follow the demo script in [docs/DEMO_PLAN_3.md](docs/DEMO_PLAN_3.md) — 90-second screen recording: capture on A, search on B, request → approve, watch the blurred preview swap for full text + green check.
-
-### Consent E2E test
-
-Excluded from CI; run on a dev machine with outbound UDP:
-
-```bash
-pnpm e2e:consent
-```
-
-Spawns two sidecars, walks the entire flow (capture → search → request → approve → granted), and asserts the requester receives unblurred text via the consent grant.
-
-### Known limitations (Plan 3)
-
-- **Cross-peer audit verification** — Plan 3 ships local timeline only; "admin pulls peers' logs and cross-checks" is explicitly v2.5 (spec §7).
-- **Retention policy** — audit logs grow forever in Plan 3; pruning + retention windows are future work.
-- **No soft consent / "remember this decision"** — by design (spec §8.1 hard-consent stance). Every request is a fresh decision.
-- **No per-matter sub-vaults** — single vault per peer; matter-scoping deferred to v3.
-- **Per-peer audit aggregation by admin** — same deferred line as cross-peer verification.
-
-## Folder-organized DAM (Plan 4)
-
-Plans 1–3 built the consent-gated memory model. Plan 4 turns it into a real DAM by letting you point Vault at folders on your disk:
-
-- **Add folder** from the home screen — paste an absolute path (under `$HOME`), pick a display name, set visibility. Vault walks the directory and indexes every supported file.
-- **Supported file types**: PDF (via `pdfjs-dist`), DOCX (via `mammoth`), `.txt` / `.md`, and audio (`.mp3` / `.wav` / `.m4a` / `.flac` / `.ogg`) through the existing Parakeet transcription pipeline. Each file's text is extracted, split into overlapping ~2800-char chunks, and each chunk embedded + indexed locally (a whole document overflows EmbeddingGemma's 1024-token batch limit, so large files must be chunked to be searchable at all). Search collapses chunk hits back to one result per file. The raw bytes never leave your machine until a consent grant approves `scope: "file"`.
-- **Public** folders are a sharing surface: admitted peers can search them. Delivery is governed by per-memory consent from Plan 3 (blurred preview by default; real snippet/file only after the owner approves a `consent.request`). **Important:** a public folder's memory bodies replicate via Autobee to the roster — the consent gate controls the *search/RPC surface*, not at-rest encryption. Treat a public folder's contents as readable-at-rest by admitted peers. See [THREAT_MODEL.md](THREAT_MODEL.md) §4a.
-- **Private** folders are the at-rest confidentiality boundary — local-only, never replicated. Two independent gates protect them: a **storage gate** (private memories are written to an owner-local Hyperbee under `${VAULT_ROOT}/local/`, never to the synced Autobee — proven by `packages/sync/tests/two-peer-folder.test.ts`) and a **probe-time gate** (the peer-side `handleSearchProbe` admits only known-public folders via a positive allowlist).
-- Inside a folder, **Capture / Ask / Library are folder-scoped**. The home screen's "Ask (across all folders)" runs an unscoped federated search. Typed captures land in a default per-peer **Captures** folder (public — captures replicate like any public memory, as in Plans 1-3; put a note in a private folder to keep it fully node-local).
-- **Re-scan** (manual) picks up new/changed/deleted files; **Make public/private** toggles visibility (applies to future ingests); **Delete** removes the folder from the vault without touching the files on disk.
-
-### Running the folder demo
-
-The Plan 2 setup applies (`pnpm install && pnpm dev` + `pnpm --filter @vault/web dev`). Then follow [docs/DEMO_PLAN_4.md](docs/DEMO_PLAN_4.md) — a ~90-second walkthrough that adds a folder of text files, watches the ingest progress, and searches inside the folder.
-
-### Folder E2E test
-
-A browser-driven Playwright spec exercises the full add-folder → ingest → search-inside flow. Excluded from the default `vitest` runner; runs via:
-
-```bash
-pnpm --filter @vault/e2e test:playwright
-```
-
-### Known limitations (Plan 4)
-
-- **Manual re-scan only** — no live filesystem watcher (no chokidar / fs.watch).
-- **No OCR** — image-only PDFs without a text layer produce empty bodies and are skipped.
-- **Public/private only** — no per-peer folder ACL (a folder is visible to all admitted peers or to no one).
-- **Flat folder UI** — a chosen directory is walked recursively and collapsed into one Vault folder; no nested folder navigation.
-- **Visibility toggle is not retroactive** — flipping public→private stops the owner's probe handler from serving the folder, but memories already replicated to peers' Autobee views are not recalled. To fully re-route, delete + re-add the folder as private. (THREAT_MODEL §4a.)
-- **No at-rest encryption of replicated records** — public-folder bodies + typed captures replicate in cleartext to admitted peers; the consent gate controls the search/RPC surface, not raw-view inspection. Private folders are the at-rest boundary. (THREAT_MODEL §4a.)
-- **Path entry by paste** — the browser File System Access API is Chromium-only and gated, so you paste an absolute path rather than using a native picker. A desktop wrapper (Electron/Tauri) would add a native dir picker in a future version.
-- **No in-app file preview** — once a peer grants `scope: "file"`, the bytes flow as base64 and download; a built-in PDF/image viewer is deferred.
-- **Orphan embeddings on edit/delete** — editing a file's content between reindexes can leave stale chunk vectors in the workspace (re-scan mints a new memory id; content-hash dedup keeps unchanged content from duplicating, but old chunks linger). They're dropped from results (their tombstoned memory resolves to no live folder) and dedupe to their parent, so they're harmless in the UI. The `memory.reindex` message **wipes the workspace and rebuilds from scratch**, clearing all orphans — the canonical recovery for files indexed before chunked embedding, or after many edits.
+---
 
 ## Submission deliverables
 
+Vault was built as the Tether QVAC SDK Technical PM take-home (2026-05-25 → 2026-05-28), delivered across four implementation plans (foundation → multi-peer sync → consent/audit/admin → folder DAM).
+
 - **Source code** — this repo.
-- **Repository access** — granted to `@elchiapp` (pre-submission).
-- **README** — this file.
-- **Architecture notes** — [docs/superpowers/specs/2026-05-25-vault-design.md](docs/superpowers/specs/2026-05-25-vault-design.md).
-- **Implementation plans** — Plan 1: [docs/superpowers/plans/2026-05-26-vault-1-foundation.md](docs/superpowers/plans/2026-05-26-vault-1-foundation.md). Plan 2: [docs/superpowers/plans/2026-05-26-vault-2-multi-peer-sync.md](docs/superpowers/plans/2026-05-26-vault-2-multi-peer-sync.md). Plan 3: [docs/superpowers/plans/2026-05-26-vault-3-consent-audit-admin.md](docs/superpowers/plans/2026-05-26-vault-3-consent-audit-admin.md). Plan 4: [docs/superpowers/plans/2026-05-26-vault-4-folders-dam.md](docs/superpowers/plans/2026-05-26-vault-4-folders-dam.md).
-- **Multi-peer demo script** — [docs/DEMO_PLAN_2.md](docs/DEMO_PLAN_2.md).
-- **Consent demo script** — [docs/DEMO_PLAN_3.md](docs/DEMO_PLAN_3.md).
-- **Folder DAM demo script** — [docs/DEMO_PLAN_4.md](docs/DEMO_PLAN_4.md).
+- **Design spec** — [docs/superpowers/specs/2026-05-25-vault-design.md](docs/superpowers/specs/2026-05-25-vault-design.md).
+- **Implementation plans** — [Plan 1](docs/superpowers/plans/2026-05-26-vault-1-foundation.md) · [Plan 2](docs/superpowers/plans/2026-05-26-vault-2-multi-peer-sync.md) · [Plan 3](docs/superpowers/plans/2026-05-26-vault-3-consent-audit-admin.md) · [Plan 4](docs/superpowers/plans/2026-05-26-vault-4-folders-dam.md).
+- **Demo scripts** — [multi-peer](docs/DEMO_PLAN_2.md) · [consent](docs/DEMO_PLAN_3.md) · [folders](docs/DEMO_PLAN_4.md).
 - **QVAC SDK spike notes** — [docs/superpowers/notes/2026-05-26-qvac-spike.md](docs/superpowers/notes/2026-05-26-qvac-spike.md).
-- **Model/engine tradeoffs** — [MODEL_TRADEOFFS.md](MODEL_TRADEOFFS.md).
-- **Threat model + trust posture** — [THREAT_MODEL.md](THREAT_MODEL.md).
-- **Test instructions** — see [Tests](#tests) above.
-- **Known limitations** — see [Known limitations](#known-limitations) above.
-- **Demo video (≤3 min)** — see `docs/DEMO.md` (committed alongside the video file).
+- **Model & engine tradeoffs** — [MODEL_TRADEOFFS.md](MODEL_TRADEOFFS.md).
+- **Threat model & trust posture** — [THREAT_MODEL.md](THREAT_MODEL.md).
 
 ## License
 
