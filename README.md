@@ -50,7 +50,7 @@ Vault is multi-device by design, with no central server:
 3. A teammate **pastes the token** and is admitted as a member.
 4. Devices **discover each other** over the Hyperswarm DHT and sync directly, peer-to-peer.
 
-Once connected, a search runs across everyone's public folders. But — and this is the point — **a teammate never silently reads your documents.** Their search returns only a blurred preview (first word + redaction). To see the real content they must click "Request access," which pops a **consent prompt on your device**: Snippet / Full file / Deny, with a 5-minute countdown. Every request and decision is written to a tamper-evident **audit log** you can review. Admins can revoke a member at any time, and revoked devices are immediately locked out of the shared state.
+Once connected, a search runs across everyone's public folders. But — and this is the point — **a teammate never silently reads your documents.** Their search returns only a blurred preview (first word + redaction). To see the real content they must click "Request access," which pops a **consent prompt on your device**: Snippet / Full file / Deny, with a 5-minute countdown. The request travels as a signed record on the shared log — only admitted members can write one, so a non-member or revoked peer can't even ask. Your approval, which carries the actual content, is sent **directly to that one teammate** (point-to-point), never broadcast to the rest of the team. Every request and decision is written to a tamper-evident **audit log** you can review. Admins can revoke a member at any time, and revoked devices are immediately locked out — of both writing to the shared state **and** searching or requesting your content.
 
 ---
 
@@ -142,7 +142,7 @@ Vault is a single backend process (the **sidecar**) that the browser UI talks to
 
 **Asking a question** → the sidecar embeds the question, runs vector search (collapsing multiple chunk-hits back to one result per document), assembles a token-budgeted prompt (folder context + top passages + your question, trimmed so it can never overflow the model's context window), and streams the LLM's answer back token by token with citations. For team searches, the same query is sent to connected peers, who each run local search and return *blurred* previews until you're granted access.
 
-**Working with teammates** → invite tokens are Ed25519-signed and carry the admin's writer key plus an expiry. Membership is enforced by a deterministic `apply()` function over the shared Autobee log: only admitted, non-revoked peers can append. Every consent request, grant, denial, and expiry is recorded as an event in a per-peer audit log.
+**Working with teammates** → invite tokens are Ed25519-signed and carry the admin's writer key plus an expiry. Membership is enforced by a deterministic `apply()` function over the shared Autobee log: only admitted, non-revoked peers can append. The peer-to-peer swarm is bound to each peer's Autobee writer key, so a connection's network identity *is* its roster identity — which lets inbound searches and consent requests be gated against the roster, and lets a consent approval be routed point-to-point to the exact requester. Consent **requests** ride the shared log as signed, roster-gated records; consent **approvals** (which carry document content) are sent directly to the one requester, never broadcast. Every consent request, grant, denial, and expiry is recorded as an event in a per-peer audit log.
 
 ### The packages
 
@@ -182,7 +182,7 @@ A **public** folder's records replicate to admitted teammates, and the *consent 
 
 ### Notable engineering choices
 
-- **Two identity keys, one canonical.** Each peer has an Ed25519 *identity* key and an Autobee *writer* key. The writer key is canonical for ownership, the membership gate, and search attribution; mixing them up silently drops writes, so the codebase is careful to always stamp records with the writer key.
+- **Two identity keys, one canonical.** Each peer has an Ed25519 *identity* key and an Autobee *writer* key. The writer key is canonical for ownership, the membership gate, search attribution, **and the peer-to-peer swarm identity** (the Hyperswarm node is bound to the writer keyPair, so a connection's authenticated pubkey equals the peer's roster key). Mixing the two keys up silently drops writes, so the codebase always stamps records — and consent requests — with the writer key.
 - **Chunked embedding.** Large documents exceed the embedding model's 1,024-token batch limit, so each file is split into overlapping windows, embedded per-chunk, and indexed under a `<documentId>#<chunkIndex>` key; search recovers the parent document and keeps the best-scoring chunk. Re-indexing wipes and rebuilds the vector store cleanly.
 - **Prompt budgeting.** The answer prompt is assembled under a token budget (folder context + top passages + question always fit), so it can never overflow the model's context window regardless of how many passages search returns.
 - **Untrusted LLM output.** Extraction validates every entity against its schema and drops individual failures rather than aborting a capture.

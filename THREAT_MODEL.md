@@ -148,7 +148,7 @@ These are spec-defined claims that Plan 1 doesn't yet implement. Each is honestl
 
 **Spec:** Admin issues a signed `Revocation`; peers refuse writes from the revoked peer; departed member loses access to new content.
 
-**Status:** Schema is defined. The runtime broadcast + `apply()` enforcement is scoped to Plan 2.
+**Status:** Implemented. `apply()` drops writes (and consent-request records) from revoked peers, AND the **read surface is gated**: because the Hyperswarm node is bound to the autobee writer keyPair, an inbound connection's authenticated pubkey is its roster identity, so `search.probe` and `consent.request` handlers reject any caller not in the roster or in the revoked set. A revoked peer therefore loses both write access and the ability to search or request a peer's content — closing the earlier gap where revocation gated writes only. (Earlier versions routed consent over a Hyperswarm channel keyed by a random noise pubkey unrelated to the writer key, so cross-peer consent silently never reached the owner and the probe surface was ungated; the writer-keyPair binding fixed both.)
 
 ### Hardened distribution
 
@@ -216,6 +216,8 @@ These are risks Vault cannot fully eliminate by design. Each is named here, with
 **Risk:** Plan 4 introduces folders. A **private** folder's memories are written to an owner-local Hyperbee (`$VAULT_ROOT/local/`) and never enter the synced Autobee — they are confidential from peers at rest. A **public** folder's memory *records* (including the `body` text extracted from the file) DO replicate via Autobee to every admitted roster member, the same way Plan 1-3 memory records always have. Raw file *bytes* still never replicate (only the extracted text in the Memory record does).
 
 This means the consent gate (Plan 3) and the search-probe folder filter are **read-time controls on cooperative search**, not at-rest confidentiality. An admitted peer that inspects its own replicated Autobee view directly — rather than going through `search.probe` — can read every public-folder memory body and every typed capture (which uses the public/replicating path). The blurred-preview + per-request consent flow governs what the *UI and RPC surface* expose; it does not encrypt replicated records.
+
+The cooperative-search surface is now **roster-gated for both reads and requests**: the Hyperswarm node is bound to the autobee writer keyPair, so an inbound `search.probe` from a non-member or revoked peer returns no hits, and a consent **request** is a signed, roster-gated record on the shared log (a non-member can't write one). A consent **approval** carries content and is delivered **point-to-point to the single requester** — never broadcast to the roster — so granting one peer does not expose the content to the others. None of this changes the at-rest posture above: admitted peers still hold public-folder bodies in cleartext in their own replicated view.
 
 **Mitigation / posture:**
 
