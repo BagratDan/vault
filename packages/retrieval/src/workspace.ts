@@ -3,7 +3,6 @@ import {
   ragCloseWorkspace,
   ragDeleteWorkspace,
 } from "@qvac/sdk";
-import type { Ulid } from "@vault/domain";
 
 export function workspaceName(peerId: string): string {
   if (peerId.length < 6) {
@@ -13,7 +12,11 @@ export function workspaceName(peerId: string): string {
 }
 
 export interface IngestInput {
-  memoryId: Ulid;
+  /** Workspace document id. For chunked memories this is
+   *  `<memoryId>#<chunkIndex>`; the parent memoryId is recovered at search
+   *  time by splitting on the last '#'. (ragSearch v0.11.0 does not return
+   *  stored metadata, so the parent is encoded in the id, not metadata.) */
+  memoryId: string;
   body: string;
   tags: readonly string[];
   /** Pre-computed embedding for `body`. Computed in the capture pipeline
