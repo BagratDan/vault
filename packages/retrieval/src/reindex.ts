@@ -26,7 +26,7 @@ export interface MemoryForMigration {
 
 /** Migrate a workspace by re-ingesting every memory into a fresh workspace.
  *  Returns the new workspace name for the caller's atomic pointer swap.
- *  Throws if the ingested count does not match the source count. */
+ *  Throws if any memory fails to ingest. */
 export async function migrateWorkspace(input: {
   oldWorkspace: string;
   newWorkspace: string;
@@ -34,7 +34,7 @@ export async function migrateWorkspace(input: {
   memories: () => AsyncIterable<MemoryForMigration>;
 }): Promise<string> {
   let count = 0;
-  let ingested = 0;
+  let failed = 0;
   for await (const m of input.memories()) {
     count++;
     const res = await ragIngest({
@@ -43,10 +43,11 @@ export async function migrateWorkspace(input: {
       documents: [m.body],
       chunk: true,
     });
-    ingested += res.processed.filter((p) => p.status === "fulfilled").length;
+    const ok = res.processed.some((p) => p.status === "fulfilled");
+    if (!ok) failed++;
   }
-  if (ingested < count) {
-    throw new Error(`migrateWorkspace: ingested ${ingested} of ${count} memories`);
+  if (failed > 0) {
+    throw new Error(`migrateWorkspace: ${failed} of ${count} memories failed to ingest`);
   }
   return input.newWorkspace;
 }

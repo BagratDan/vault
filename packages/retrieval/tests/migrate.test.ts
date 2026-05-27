@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 const ingested: string[] = [];
 vi.mock("@qvac/sdk", () => ({
   ragIngest: vi.fn(async ({ documents }: { documents: string[] }) => {
@@ -10,6 +10,7 @@ vi.mock("@qvac/sdk", () => ({
 import { migrateWorkspace } from "../src/reindex.js";
 
 describe("migrateWorkspace", () => {
+  beforeEach(() => { ingested.length = 0; });
   it("ingests all memories into the new workspace", async () => {
     async function* mems() {
       yield { memoryId: "M1" as never, body: "a", tags: [] };
