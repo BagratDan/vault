@@ -132,6 +132,7 @@ Major technology choices and why each was picked. Detailed model/engine tradeoff
 - `@qvac/sdk` v0.11.0 — sole AI dependency.
 - Provider lifecycle managed by `@vault/ai/src/provider.ts` (idempotent `startQVACProvider` / `stopQVACProvider`).
 - `ModelPool` enforces the "at most one large model resident" discipline. STT and embed are small enough to co-reside; LLM and TTS evict each other on load.
+- **Ask prompt budgeting.** The LLM loads with a 4096-token context (`modelConfig: { ctx_size }` — QVAC defaults to 1024, which overflows once retrieved chunks are large). `buildAnswerContext` trims the assembled prompt (folder context + top snippets + question) to a ~3000-token budget so it can never overflow, regardless of how many chunks search returns. Per-folder file counts are injected into the context so "how many files…" style questions can be answered inline (semantic retrieval alone can't count files).
 - Model registry constants pinned in `@vault/ai/src/models.ts`. Plan 1 ships Llama 3.2 1B Q4_0 / EmbeddingGemma 300M Q4_0 / Chatterbox EN-ES Q4F16 / Parakeet TDT INT8 (encoder + decoder + preprocessor + vocab).
 - A single ambient `tools/types/qvac-shim.d.ts` works around a `@qvac/sdk` v0.11.0 `.d.ts` issue where extension-less re-exports trip NodeNext resolution. Documented in [docs/superpowers/notes/2026-05-26-qvac-spike.md](docs/superpowers/notes/2026-05-26-qvac-spike.md).
 
