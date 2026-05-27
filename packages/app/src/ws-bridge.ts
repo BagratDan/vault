@@ -129,6 +129,16 @@ function requireConsent(deps: BridgeDeps): {
   return { consentState, audit };
 }
 
+async function listEntitiesByKind(
+  repo: Repo,
+  kind: "person" | "place" | "event" | "task"
+) {
+  if (kind === "person") return repo.listPersons();
+  if (kind === "place") return repo.listPlaces();
+  if (kind === "event") return repo.listEvents();
+  return repo.listTasks();
+}
+
 function buildConsentDeps(deps: BridgeDeps): ConsentDeps {
   const { consentState, audit } = requireConsent(deps);
   const store = deps.runtime.store;
@@ -387,22 +397,16 @@ async function routeMessage(
     case "entity.list": {
       return requireVaultActive(deps, async () => {
         const repo = deps.getRepo();
-        const items =
-          msg.entityKind === "person" ? await repo.listPersons() :
-          msg.entityKind === "place"  ? await repo.listPlaces()  :
-          msg.entityKind === "event"  ? await repo.listEvents()  :
-          await repo.listTasks();
+        const items = await listEntitiesByKind(repo, msg.entityKind);
         return { kind: "entity.results", entityKind: msg.entityKind, items };
       });
     }
     case "entity.get": {
       return requireVaultActive(deps, async () => {
         const repo = deps.getRepo();
-        const list =
-          msg.entityKind === "person" ? await repo.listPersons() :
-          msg.entityKind === "place"  ? await repo.listPlaces()  :
-          msg.entityKind === "event"  ? await repo.listEvents()  :
-          await repo.listTasks();
+        const list = await listEntitiesByKind(repo, msg.entityKind);
+        // Linear scan over the entity list — fine at personal-DAM entity counts.
+        // TODO: add a repo.getEntity(kind, id) point-get if entity counts grow large.
         const record = list.find((r) => r.id === msg.id) ?? null;
         const indexes = deps.getIndexes();
         const from = await indexes.relationshipsFrom(msg.id);
