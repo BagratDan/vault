@@ -32,3 +32,14 @@ describe("edge indexes", () => {
     expect(to).toEqual([{ relId: "REL1", fromId: "MEM1", type: "mentions" }]);
   });
 });
+
+describe("folder index", () => {
+  it("lists memory ids for a folder", async () => {
+    const { indexes } = makeIndexes();
+    await indexes.indexFolderMembership("FOLDER1", "MEM1");
+    await indexes.indexFolderMembership("FOLDER1", "MEM2");
+    await indexes.indexFolderMembership("FOLDER2", "MEM3");
+    expect((await indexes.memoryIdsForFolder("FOLDER1")).sort()).toEqual(["MEM1", "MEM2"]);
+    expect(await indexes.memoryIdsForFolder("FOLDER2")).toEqual(["MEM3"]);
+  });
+});

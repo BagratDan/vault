@@ -107,6 +107,18 @@ export class Indexes {
     return out;
   }
 
+  async indexFolderMembership(folderId: string, memoryId: string): Promise<void> {
+    await this.append({
+      kind: "index",
+      key: `idx/folder/${encodeSegment(folderId)}/${memoryId}`,
+      value: { memoryId },
+    });
+  }
+
+  async memoryIdsForFolder(folderId: string): Promise<string[]> {
+    return this.listIds(`idx/folder/${encodeSegment(folderId)}/`);
+  }
+
   private async listIds(prefix: string): Promise<string[]> {
     const out: string[] = [];
     for await (const node of this.view.createReadStream({
