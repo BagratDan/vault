@@ -8,7 +8,7 @@ export interface ChatMessage {
 }
 
 const LLM_HANDLE: ModelHandle = {
-  id: "qwen3-4b-inst-q4_k_m",
+  id: "llama-3.2-1b-inst-q4_0",
   size: "large" as const,
   src: VAULT_MODELS.llm,
   // QVAC defaults ctx_size to 1024, which overflows on multi-snippet Ask
