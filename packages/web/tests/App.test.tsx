@@ -1,6 +1,6 @@
 import React from "react";
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { App } from "../src/App.js";
 
 // Mock fetch so the /token request succeeds without a real server
@@ -32,13 +32,33 @@ vi.mock("../src/ws-client.js", () => ({
   },
 }));
 
+afterEach(() => {
+  // Reset the hash so each test starts on the default (ask) route.
+  act(() => {
+    window.location.hash = "";
+  });
+});
+
 describe("App", () => {
-  it("renders the folder list and search bar on home", async () => {
+  it("renders the sidebar and the ask/search surface on the default route", async () => {
     render(<App />);
-    await waitFor(() => screen.getByText(/^folders$/i));
-    expect(screen.getByText(/^folders$/i)).toBeTruthy();
-    expect(screen.getByRole("button", { name: /add folder/i })).toBeTruthy();
+    await waitFor(() => screen.getByPlaceholderText(/ask anything/i));
+    // Sidebar nav is present across the main routes.
+    expect(screen.getByRole("link", { name: "Ask" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Folders" })).toBeTruthy();
+    // The ask/search surface is the default landing.
     expect(screen.getByPlaceholderText(/ask anything/i)).toBeTruthy();
+  });
+
+  it("navigating to Folders shows the folder list and add-folder button", async () => {
+    render(<App />);
+    await waitFor(() => screen.getByRole("link", { name: "Folders" }));
+    act(() => {
+      fireEvent.click(screen.getByRole("link", { name: "Folders" }));
+    });
+    await waitFor(() => screen.getByRole("button", { name: /add folder/i }));
+    expect(screen.getByRole("heading", { name: /^folders$/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /add folder/i })).toBeTruthy();
   });
 
   it("submitting a search clears the search input", async () => {
