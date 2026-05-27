@@ -87,6 +87,61 @@ export function buildAnswerContext(
   return `${statsLine}${snippetBlock}${questionLine}`.trim();
 }
 
+export const FOLDER_SUMMARY_SYSTEM_PROMPT =
+  "You are given short summaries of the files in a folder. Write a concise overview of what this folder contains and the main themes across the files. Ground your answer ONLY in the provided summaries. Do NOT write code.";
+
+export interface FolderSummaryItem {
+  summary: string;
+  body?: string;
+}
+
+export interface FolderSummaryContextOpts {
+  budgetTokens?: number;
+  charsPerToken?: number;
+}
+
+export interface FolderSummaryContext {
+  context: string;
+  included: number;
+  total: number;
+}
+
+/**
+ * Build a budgeted bulleted list of per-file summaries for a folder overview.
+ * Uses each item's `summary`; falls back to a 200-char slice of `body` when
+ * the summary is empty; skips items with neither. Trims to the token budget
+ * (so the summary prompt can't overflow the model context) and notes
+ * "(showing N of M files)" when truncated.
+ */
+export function buildFolderSummaryContext(
+  items: readonly FolderSummaryItem[],
+  opts: FolderSummaryContextOpts = {}
+): FolderSummaryContext {
+  const budgetTokens = opts.budgetTokens ?? 3000;
+  const charsPerToken = opts.charsPerToken ?? 3.5;
+  const estTokens = (s: string) => Math.ceil(s.length / charsPerToken);
+
+  const total = items.length;
+  // Reserve room for the system prompt + a possible "(showing N of M)" line.
+  let remaining = budgetTokens - SYSTEM_PROMPT_TOKENS - 20;
+  const lines: string[] = [];
+  let included = 0;
+  for (const it of items) {
+    const text = (it.summary && it.summary.trim())
+      ? it.summary.trim()
+      : (it.body ? it.body.slice(0, 200).trim() : "");
+    if (!text) continue; // skip docs with neither summary nor body
+    const line = `- ${text}\n`;
+    const cost = estTokens(line);
+    if (cost > remaining) break;
+    lines.push(line);
+    remaining -= cost;
+    included += 1;
+  }
+  const note = included < total ? `\n(showing ${included} of ${total} files)` : "";
+  return { context: lines.join("") + note, included, total };
+}
+
 export async function complete(
   pool: ModelPool,
   history: ChatMessage[]
