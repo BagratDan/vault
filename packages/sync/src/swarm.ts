@@ -16,7 +16,18 @@ export interface RpcSession {
   close(): void;
 }
 
-export type RpcHandler = (method: string, params: unknown) => Promise<unknown>;
+/** Transport-level handler: receives the connecting peer's id (the writer
+ *  key, once the swarm is bound to the writer keyPair) so handlers can
+ *  roster-gate by caller. */
+export type RpcHandler = (
+  peerId: string,
+  method: string,
+  params: unknown
+) => Promise<unknown>;
+
+/** Per-connection handler passed to wireRpc — the transport curries the
+ *  peer id, so this stays 2-arg. */
+export type WireHandler = (method: string, params: unknown) => Promise<unknown>;
 
 interface Frame {
   v: 1;
@@ -32,7 +43,7 @@ interface Frame {
  * Wires a JSON-line RPC layer on top of a duplex string transport.
  * Returns an RpcSession that lets the caller initiate requests.
  */
-export function wireRpc(duplex: DuplexLike, handler: RpcHandler): RpcSession {
+export function wireRpc(duplex: DuplexLike, handler: WireHandler): RpcSession {
   const pending = new Map<
     string,
     { resolve: (v: unknown) => void; reject: (e: Error) => void }

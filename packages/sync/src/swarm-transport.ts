@@ -41,15 +41,27 @@ export class SwarmTransport {
   private connections = new Map<string, RpcSession>();
   private handler: RpcHandler;
   private events: SwarmEvents;
+  private keyPair: { publicKey: Uint8Array; secretKey: Uint8Array } | undefined;
 
-  constructor(handler: RpcHandler, events: SwarmEvents = {}) {
+  constructor(
+    handler: RpcHandler,
+    events: SwarmEvents = {},
+    keyPair?: { publicKey: Uint8Array; secretKey: Uint8Array }
+  ) {
     this.handler = handler;
     this.events = events;
+    this.keyPair = keyPair;
   }
 
   async join(topicHex: string): Promise<void> {
     const topic = b4a.from(topicHex, "hex");
-    this.swarm = new Hyperswarm();
+    // Bind the swarm to the autobee writer keyPair so a connection's noise
+    // pubkey == the peer's writer key == its roster key. This makes
+    // point-to-point consent grants route correctly and lets inbound RPCs be
+    // gated against the roster by the connecting peer's id.
+    this.swarm = this.keyPair
+      ? new Hyperswarm({ keyPair: this.keyPair })
+      : new Hyperswarm();
 
     this.swarm.on("connection", (conn, info) => {
       const peerPk = b4a.toString(info.publicKey, "hex");
@@ -91,7 +103,7 @@ export class SwarmTransport {
           await this.events.onConsentResponse?.(peerPk, params as ConsentResponse);
           return { ok: true };
         }
-        return this.handler(method, params);
+        return this.handler(peerPk, method, params);
       });
       this.connections.set(peerPk, session);
       void this.events.onPeerConnect?.(peerPk, session);
