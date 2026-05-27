@@ -11,6 +11,10 @@ import {
 } from "@vault/sync";
 import type { ConsentState, PendingEntry } from "../consent-state.js";
 
+/** Max characters returned for a granted "snippet" scope — a bounded excerpt,
+ *  distinct from the full-document "file" scope. */
+const SNIPPET_MAX_CHARS = 500;
+
 export interface ConsentDeps {
   swarm: SwarmTransport | null;
   consentState: ConsentState;
@@ -186,7 +190,15 @@ function buildPayload(
     return { tags: memory.tags, createdAt: memory.createdAt };
   }
   if (scope === "snippet") {
-    return { text: memory.body };
+    // A granted "snippet" is a bounded excerpt, NOT the whole document — that
+    // is what the higher "file" scope is for. Returning the full body here
+    // collapsed the scope ladder (metadata < snippet < file) so a snippet
+    // grant leaked everything a file grant would.
+    const text =
+      memory.body.length > SNIPPET_MAX_CHARS
+        ? memory.body.slice(0, SNIPPET_MAX_CHARS) + "…"
+        : memory.body;
+    return { text };
   }
   const bytes = Buffer.from(memory.body, "utf8");
   return {
