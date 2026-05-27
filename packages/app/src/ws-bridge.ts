@@ -19,6 +19,7 @@ import type { ConsentEvent } from "@vault/domain";
 import { captureText, captureAudio } from "./routes/capture.js";
 import { runSearch } from "./routes/search.js";
 import { getMemory } from "./routes/memory.js";
+import { reindexAllMemories } from "./routes/reindex.js";
 import { streamTts } from "./routes/tts.js";
 import * as vaultRoutes from "./routes/vault.js";
 import {
@@ -334,6 +335,19 @@ async function routeMessage(
           folderId: m.folderId,
         }));
         return { kind: "memory.list", memories };
+      });
+    }
+    case "memory.reindex": {
+      return requireVaultActive(deps, async () => {
+        const r = await reindexAllMemories({
+          pool: deps.pool,
+          workspace: deps.workspace,
+          // autobee writer key for attribution, matching folder routes
+          ownerPeerId: deps.runtime.store?.localPeerId ?? deps.identity.peerId,
+          getRepo: deps.getRepo,
+          getFolderLocal: deps.getFolderLocal,
+        });
+        return { kind: "memory.reindex", memories: r.memories, embedded: r.embedded, errors: r.errors };
       });
     }
     case "tts.play": {

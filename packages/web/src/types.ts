@@ -19,6 +19,7 @@ export type ClientMessage =
     }
   | { kind: "memory.get"; memoryId: string }
   | { kind: "memory.list"; limit?: number }
+  | { kind: "memory.reindex" }
   | { kind: "tts.play"; text: string; requestId: string }
   | { kind: "vault.status" }
   | { kind: "vault.create"; displayName: string }
@@ -81,6 +82,7 @@ export type ServerMessage =
         folderId: string;
       }>;
     }
+  | { kind: "memory.reindex"; memories: number; embedded: number; errors: number }
   | { kind: "answer.chunk"; requestId: string; text: string }
   | { kind: "answer.done"; requestId: string; citations: Citation[] }
   | { kind: "tts.chunk"; requestId: string; audioBase64: string }

@@ -72,6 +72,14 @@ export class Workspace {
     await ragDeleteWorkspace({ workspace: this.name });
   }
 
+  /** Drop all indexed documents (wipe-and-rebuild reindex). The SDK
+   *  re-creates the workspace lazily on the next ingest(), so the instance
+   *  stays usable — unlike destroy(), this does NOT close the instance. */
+  async reset(): Promise<void> {
+    this.ensureOpen();
+    await ragDeleteWorkspace({ workspace: this.name });
+  }
+
   private ensureOpen(): void {
     if (this.closed) {
       throw new Error(`workspace ${this.name} is closed`);

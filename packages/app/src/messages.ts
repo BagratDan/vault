@@ -38,6 +38,8 @@ const memoryList = z.object({
   limit: z.number().int().positive().optional(),
 });
 
+const memoryReindexSchema = z.object({ kind: z.literal("memory.reindex") });
+
 const ttsPlay = z.object({
   kind: z.literal("tts.play"),
   text: z.string().min(1),
@@ -125,6 +127,7 @@ export const clientMessageShape = z.discriminatedUnion("kind", [
   searchRun,
   memoryGet,
   memoryList,
+  memoryReindexSchema,
   ttsPlay,
   vaultStatus,
   vaultCreate,
@@ -181,6 +184,13 @@ const memoryListReply = z.object({
       folderId: z.string(),
     })
   ),
+});
+
+const memoryReindexReply = z.object({
+  kind: z.literal("memory.reindex"),
+  memories: z.number().int().nonnegative(),
+  embedded: z.number().int().nonnegative(),
+  errors: z.number().int().nonnegative(),
 });
 
 const answerChunk = z.object({
@@ -363,6 +373,7 @@ export const serverMessageShape = z.discriminatedUnion("kind", [
   captureAck,
   searchHits,
   memoryListReply,
+  memoryReindexReply,
   answerChunk,
   answerDone,
   ttsChunk,

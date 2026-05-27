@@ -83,6 +83,17 @@ export class FolderLocal {
     return r ? (r.value as Memory) : null;
   }
 
+  async listAllPrivateMemories(): Promise<Memory[]> {
+    const out: Memory[] = [];
+    for await (const { value } of this.bee.createReadStream({
+      gte: "memory/",
+      lt: "memory/~",
+    })) {
+      out.push(value as Memory);
+    }
+    return out;
+  }
+
   async listPrivateMemoriesByFolder(folderId: string): Promise<Memory[]> {
     const out: Memory[] = [];
     for await (const { value } of this.bee.createReadStream({
