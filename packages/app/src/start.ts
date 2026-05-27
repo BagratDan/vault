@@ -86,6 +86,7 @@ export async function startVault(): Promise<VaultHandle> {
   let consentState: ConsentState | null = null;
   let audit: AuditLog | null = null;
   let consentScanHandle: ReturnType<typeof setInterval> | null = null;
+  let backfillDone = false;
 
   // The RPC handler dispatches inbound RPC messages from connected peers.
   // Currently: search.probe (federated search). Plan 3 will add consent.request.
@@ -478,6 +479,28 @@ export async function startVault(): Promise<VaultHandle> {
     );
     await swarm.join(state.topic);
     runtime.swarm = swarm;
+
+    // One-shot, best-effort backfill of folder + meta indexes for memories
+    // created before those indexes existed. Constructed inline (not via the
+    // getRepo/getIndexes arrows, which are defined later and would be in the
+    // temporal dead zone on the boot-time activation path).
+    if (runtime.store && !backfillDone) {
+      backfillDone = true;
+      try {
+        const bfRepo = new Repo({
+          view: runtime.store.view,
+          append: runtime.store.append,
+          ownerPeerId: identity.peerId,
+        });
+        const bfIndexes = new Indexes({
+          view: runtime.store.view,
+          append: runtime.store.append,
+        });
+        await bfRepo.backfillIndexes(bfIndexes);
+      } catch (err) {
+        console.warn("[vault] index backfill failed:", err);
+      }
+    }
   }
 
   // Boot-time vault open: if state file exists, open the store and join swarm.

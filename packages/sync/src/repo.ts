@@ -124,6 +124,25 @@ export class Repo {
     });
   }
 
+  /** One-time, idempotent backfill of folder + meta indexes for existing
+   *  public memories. Edge backfill is intentionally skipped: pre-existing
+   *  memories lack persisted entity ids to link, so edges are only written
+   *  for new captures going forward. */
+  async backfillIndexes(indexes: Indexes): Promise<void> {
+    const memories = await this.listMemories();
+    for (const m of memories) {
+      const existing = await indexes.metaForMemories([m.id]);
+      if (existing.has(m.id)) continue; // already backfilled
+      await indexes.indexFolderMembership(m.folderId, m.id);
+      await indexes.indexMeta(m.id, {
+        tags: m.tags,
+        ownerPeerId: m.ownerPeerId,
+        createdAt: m.createdAt,
+        personIds: [],
+      });
+    }
+  }
+
   // Folder (PUBLIC subset, synced) ----------------------------------------
   async putFolderPublic(folderPublic: FolderPublic): Promise<void> {
     folderPublicShape.parse(folderPublic);
