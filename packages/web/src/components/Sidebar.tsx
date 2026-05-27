@@ -17,7 +17,7 @@ export function Sidebar({ current, onNavigate }: { current: Route; onNavigate: (
       {ITEMS.map((it) => (
         <a
           key={it.route}
-          href="#"
+          href={it.route === "ask" ? "#" : `#/${it.route}`}
           aria-current={current === it.route ? "page" : undefined}
           className={current === it.route ? "font-semibold" : ""}
           onClick={(e) => {

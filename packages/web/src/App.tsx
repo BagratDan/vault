@@ -21,6 +21,7 @@ import {
   useRecordRoute,
   navigateRecord,
   type RecordKind,
+  type Route,
 } from "./routes.js";
 import { FolderList, type FolderRow } from "./components/FolderList.js";
 import { AddFolderDialog } from "./components/AddFolderDialog.js";
@@ -33,6 +34,18 @@ import type { Hit, Citation, ClientMessage, RelEdge } from "./types.js";
 
 type EntityKind = "person" | "place" | "event" | "task";
 type EntityRecord = Record<string, unknown>;
+
+/** A memory row as carried by `memory.list` and `memory.detail`. */
+interface MemoryRecord {
+  memoryId: string;
+  summary: string;
+  body: string;
+  tags: string[];
+  createdAt: string;
+  ownerPeerId: string;
+  confidence: number;
+  folderId: string;
+}
 
 /** Safe string read from a record's index signature. */
 function field(r: EntityRecord, key: string): string {
@@ -50,6 +63,56 @@ function entityLabel(kind: EntityKind, r: EntityRecord): string {
   if (kind === "person") return field(r, "displayName") || entityId(r);
   if (kind === "place") return field(r, "name") || entityId(r);
   return field(r, "title") || entityId(r); // event | task
+}
+
+interface RouteHeaderProps {
+  peers: Peer[];
+  selfPeerId: string;
+  connState: "idle" | "loading" | "ready" | "error";
+  inviteToken: { token: string; expiresAt: string } | null;
+  banner: { kind: "info" | "success" | "error"; text: string } | null;
+  onCreateInvite: () => void;
+  onDismissInvite: () => void;
+  onDismissBanner: () => void;
+}
+
+/**
+ * Page header shared by every route. Declared at MODULE scope (not inside App)
+ * so React keeps a stable component type across App re-renders — otherwise its
+ * subtree (incl. PeerList, which holds its own state) would remount each render.
+ */
+function RouteHeader({
+  peers,
+  selfPeerId,
+  connState,
+  inviteToken,
+  banner,
+  onCreateInvite,
+  onDismissInvite,
+  onDismissBanner,
+}: RouteHeaderProps) {
+  return (
+    <>
+      <header className="flex flex-wrap items-center justify-between gap-y-2">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Vault</h1>
+          <p className="text-xs text-slate-400">Local-first, consent-gated memory</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <PeerList peers={peers} selfPeerId={selfPeerId} onCreateInvite={onCreateInvite} />
+          <ModelStatus state={connState} />
+        </div>
+      </header>
+      {inviteToken && (
+        <InviteTokenDisplay
+          token={inviteToken.token}
+          expiresAt={inviteToken.expiresAt}
+          onDismiss={onDismissInvite}
+        />
+      )}
+      {banner && <Banner banner={banner} onDismiss={onDismissBanner} />}
+    </>
+  );
 }
 
 export function App() {
@@ -80,16 +143,7 @@ export function App() {
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [auditFilter, setAuditFilter] = useState<{ peerId?: string; kind?: string }>({});
   const [adminMembers, setAdminMembers] = useState<AdminMember[]>([]);
-  const [library, setLibrary] = useState<Array<{
-    memoryId: string;
-    summary: string;
-    body: string;
-    tags: string[];
-    createdAt: string;
-    ownerPeerId: string;
-    confidence: number;
-    folderId: string;
-  }>>([]);
+  const [library, setLibrary] = useState<MemoryRecord[]>([]);
   const route = useHashRoute();
   const folderRoute = useFolderRoute();
   const recordRoute = useRecordRoute();
@@ -103,6 +157,10 @@ export function App() {
     | { kind: RecordKind; id: string; record: EntityRecord | null; from: RelEdge[]; to: RelEdge[] }
     | null
   >(null);
+  // Full memory record fetched for the open record-detail route. Unlike
+  // `library` (capped at 50 via memory.list), this is point-fetched, so
+  // deep-linked older memories render their full title/body. Keyed by id.
+  const [detailMemory, setDetailMemory] = useState<MemoryRecord | null>(null);
   const [folders, setFolders] = useState<FolderRow[]>([]);
   const [addOpen, setAddOpen] = useState(false);
   const [folderProgress, setFolderProgress] = useState<
@@ -184,11 +242,22 @@ export function App() {
         ws.send({ kind: "memory.list" });
       } else if (m.kind === "memory.list") {
         setLibrary(m.memories);
+      } else if (m.kind === "memory.detail") {
+        // Stash the full point-fetched record so deep-linked older memories
+        // (beyond the 50-item library) render their full title/body. The record
+        // carries its own memoryId; detailHeader only uses it when that id
+        // matches the open detail, so a stale reply can't mislabel another memory.
+        if (m.memory) setDetailMemory(m.memory);
       } else if (m.kind === "entity.results") {
         setEntities((prev) => ({ ...prev, [m.entityKind]: m.items }));
       } else if (m.kind === "entity.detail") {
+        // Guard on BOTH kind AND record id: a delayed reply for person A must
+        // not overwrite the now-open person B (same kind). The server message
+        // has no echoed id, but the returned record carries its own.
         setDetail((prev) =>
-          prev && prev.kind === m.entityKind
+          prev &&
+          prev.kind === m.entityKind &&
+          prev.id === (m.record as { id?: string } | null)?.id
             ? { ...prev, record: m.record, from: m.from, to: m.to }
             : prev
         );
@@ -376,12 +445,16 @@ export function App() {
   useEffect(() => {
     if (!ws || !recordRoute) {
       setDetail(null);
+      setDetailMemory(null);
       return;
     }
     setDetail({ kind: recordRoute.kind, id: recordRoute.id, record: null, from: [], to: [] });
+    setDetailMemory(null);
     if (recordRoute.kind === "memory") {
-      // The memory body/summary already lives in `library`; only edges are remote.
+      // Edges are remote; the full memory record may be outside the 50-item
+      // library (memory.list cap), so point-fetch it too.
       ws.send({ kind: "relationship.list", recordId: recordRoute.id });
+      ws.send({ kind: "memory.detail-get", memoryId: recordRoute.id });
     } else {
       ws.send({ kind: "entity.get", entityKind: recordRoute.kind, id: recordRoute.id });
     }
@@ -442,6 +515,17 @@ export function App() {
   const openRecord = (id: string) => {
     const { kind } = labelOf(id);
     navigateRecord(kind, id);
+  };
+
+  const headerProps: RouteHeaderProps = {
+    peers,
+    selfPeerId,
+    connState,
+    inviteToken,
+    banner,
+    onCreateInvite: () => send({ kind: "vault.invite-create" }),
+    onDismissInvite: () => setInviteToken(null),
+    onDismissBanner: () => setBanner(null),
   };
 
   let content: React.ReactNode = null;
@@ -626,7 +710,7 @@ export function App() {
   } else if (route === "folders") {
     content = (
       <main className="mx-auto max-w-3xl space-y-5 p-6">
-        <RouteHeader />
+        <RouteHeader {...headerProps} />
         {addOpen && (
           <AddFolderDialog
             onCancel={() => setAddOpen(false)}
@@ -655,7 +739,7 @@ export function App() {
     const items = entities[kind].map((r) => ({ id: entityId(r), label: entityLabel(kind, r) }));
     content = (
       <main className="mx-auto max-w-3xl space-y-5 p-6">
-        <RouteHeader />
+        <RouteHeader {...headerProps} />
         <section className="rounded-2xl bg-slate-900 p-5 shadow">
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-400">
             {route}
@@ -667,7 +751,7 @@ export function App() {
   } else if (route === "library") {
     content = (
       <main className="mx-auto max-w-3xl space-y-5 p-6">
-        <RouteHeader />
+        <RouteHeader {...headerProps} />
         <section className="rounded-2xl bg-slate-900 p-5 shadow">
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-400">
             Library
@@ -696,7 +780,7 @@ export function App() {
     // route === "ask" — the cross-folder ask/search surface.
     content = (
       <main className="mx-auto max-w-3xl space-y-5 p-6">
-        <RouteHeader />
+        <RouteHeader {...headerProps} />
         <section className="rounded-2xl bg-slate-900 p-5 shadow">
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-400">
             Ask (across all folders)
@@ -776,53 +860,34 @@ export function App() {
     );
   }
 
-  function RouteHeader() {
-    return (
-      <>
-        <header className="flex flex-wrap items-center justify-between gap-y-2">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Vault</h1>
-            <p className="text-xs text-slate-400">Local-first, consent-gated memory</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-            <PeerList
-              peers={peers}
-              selfPeerId={selfPeerId}
-              onCreateInvite={() => send({ kind: "vault.invite-create" })}
-            />
-            <ModelStatus state={connState} />
-          </div>
-        </header>
-        {inviteToken && (
-          <InviteTokenDisplay
-            token={inviteToken.token}
-            expiresAt={inviteToken.expiresAt}
-            onDismiss={() => setInviteToken(null)}
-          />
-        )}
-        {banner && <Banner banner={banner} onDismiss={() => setBanner(null)} />}
-      </>
-    );
-  }
-
   function renderRecordDetail(): React.ReactNode {
     if (!detail) {
       return (
         <main className="mx-auto max-w-3xl space-y-5 p-6">
-          <RouteHeader />
+          <RouteHeader {...headerProps} />
           <p className="text-sm text-slate-400">Loading record…</p>
         </main>
       );
     }
     const { title, fields } = detailHeader(detail);
     const edges = edgesToRelated(detail.from, detail.to);
+    const backRoute: Route =
+      detail.kind === "memory"
+        ? "library"
+        : detail.kind === "person"
+          ? "people"
+          : detail.kind === "place"
+            ? "places"
+            : detail.kind === "event"
+              ? "events"
+              : "tasks";
     return (
       <main className="mx-auto max-w-3xl space-y-5 p-6">
-        <RouteHeader />
+        <RouteHeader {...headerProps} />
         <section className="rounded-2xl bg-slate-900 p-5 shadow">
           <button
             type="button"
-            onClick={() => navigate("ask")}
+            onClick={() => navigate(backRoute)}
             className="mb-3 text-xs text-slate-400 hover:text-slate-200"
           >
             ← back
@@ -839,7 +904,12 @@ export function App() {
     fields: { label: string; value: string }[];
   } {
     if (d.kind === "memory") {
-      const mem = library.find((m) => m.memoryId === d.id);
+      // Prefer the point-fetched full record (works for memories beyond the
+      // 50-item library cap), then the library row, then a bare id fallback.
+      const mem =
+        detailMemory && detailMemory.memoryId === d.id
+          ? detailMemory
+          : library.find((m) => m.memoryId === d.id);
       if (!mem) return { title: d.id, fields: [] };
       return {
         title: mem.summary || d.id,
