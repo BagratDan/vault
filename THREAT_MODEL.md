@@ -2,7 +2,7 @@
 
 This document covers the trust posture, threat model, and residual risks of Vault as shipped in v1 (Plan 1 — Foundation). Required reading for any IT director or security-conscious user evaluating whether to install Vault on a managed laptop.
 
-Companion docs: [README.md](README.md), [MODEL_TRADEOFFS.md](MODEL_TRADEOFFS.md), [docs/superpowers/specs/2026-05-25-vault-design.md § 10 + § 16](docs/superpowers/specs/2026-05-25-vault-design.md).
+Companion docs: [README.md](README.md), [MODEL_TRADEOFFS.md](MODEL_TRADEOFFS.md).
 
 ## What Vault is trying to be true to
 
@@ -270,7 +270,7 @@ The cooperative-search surface is now **roster-gated for both reads and requests
 
 ## How a CISO would verify Vault for their firm
 
-1. **Read this document and `docs/superpowers/specs/2026-05-25-vault-design.md` § 10.**
+1. **Read this document.**
 2. **Run** `pnpm lint && pnpm -r test && pnpm e2e`. All three pass on a fresh clone.
 3. **Run** `grep -rE "(fetch\(|XMLHttpRequest|node:http|axios)" packages/ e2e/ --include='*.ts' --include='*.tsx' --include='*.js' --include='*.mjs' | grep -v packages/net/`. Expect zero substantive matches.
 4. **Run** `grep -rE "telemetry|analytics|sentry|posthog" packages/ e2e/` (excluding node_modules). Expect empty.

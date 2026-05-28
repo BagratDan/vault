@@ -6,7 +6,7 @@ Vault lets you point your computer at folders of real documents — contracts, n
 
 Built on Tether's [QVAC SDK](https://docs.tether.io) (on-device LLM, speech-to-text, text-to-speech, embeddings, and vector search) and the Holepunch stack (Hypercore / Hyperbee / Autobee / Hyperswarm) for storage and sync.
 
-> **Companion docs:** [MODEL_TRADEOFFS.md](MODEL_TRADEOFFS.md) (why each AI model was chosen) · [THREAT_MODEL.md](THREAT_MODEL.md) (security posture and residual risks) · [docs/superpowers/specs/2026-05-25-vault-design.md](docs/superpowers/specs/2026-05-25-vault-design.md) (full design spec).
+> **Companion docs:** [MODEL_TRADEOFFS.md](MODEL_TRADEOFFS.md) (why each AI model was chosen) · [THREAT_MODEL.md](THREAT_MODEL.md) (security posture and residual risks).
 
 ---
 
@@ -88,8 +88,6 @@ On first launch the sidecar generates your Ed25519 identity (`~/.vault/identity/
 2. Watch the ingest progress bar as Vault reads and indexes each file.
 3. Open the folder and **Ask** a question about its contents.
 4. To try the team flow, run a second instance on another machine, create the Vault on the first, issue an invite, and paste it on the second.
-
-Step-by-step demo scripts: [docs/DEMO_PLAN_2.md](docs/DEMO_PLAN_2.md) (multi-device), [docs/DEMO_PLAN_3.md](docs/DEMO_PLAN_3.md) (consent), [docs/DEMO_PLAN_4.md](docs/DEMO_PLAN_4.md) (folders).
 
 ### Hardened launch (optional)
 
@@ -244,10 +242,6 @@ Honest disclosure of what Vault does **not** do today.
 Vault was built as the Tether QVAC SDK Technical PM take-home (2026-05-25 → 2026-05-28), delivered across four implementation plans (foundation → multi-peer sync → consent/audit/admin → folder DAM).
 
 - **Source code** — this repo.
-- **Design spec** — [docs/superpowers/specs/2026-05-25-vault-design.md](docs/superpowers/specs/2026-05-25-vault-design.md).
-- **Implementation plans** — [Plan 1](docs/superpowers/plans/2026-05-26-vault-1-foundation.md) · [Plan 2](docs/superpowers/plans/2026-05-26-vault-2-multi-peer-sync.md) · [Plan 3](docs/superpowers/plans/2026-05-26-vault-3-consent-audit-admin.md) · [Plan 4](docs/superpowers/plans/2026-05-26-vault-4-folders-dam.md).
-- **Demo scripts** — [multi-peer](docs/DEMO_PLAN_2.md) · [consent](docs/DEMO_PLAN_3.md) · [folders](docs/DEMO_PLAN_4.md).
-- **QVAC SDK spike notes** — [docs/superpowers/notes/2026-05-26-qvac-spike.md](docs/superpowers/notes/2026-05-26-qvac-spike.md).
 - **Model & engine tradeoffs** — [MODEL_TRADEOFFS.md](MODEL_TRADEOFFS.md).
 - **Threat model & trust posture** — [THREAT_MODEL.md](THREAT_MODEL.md).
 

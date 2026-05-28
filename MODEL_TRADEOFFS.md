@@ -2,7 +2,7 @@
 
 This document covers the substantive AI and infrastructure choices made in Plan 1 of Vault, the reasoning behind each, and the alternatives that were considered. Required submission deliverable per the Tether take-home.
 
-Companion docs: [README.md](README.md) (setup + stack summary), [docs/superpowers/specs/2026-05-25-vault-design.md](docs/superpowers/specs/2026-05-25-vault-design.md) (full architectural spec), [docs/superpowers/notes/2026-05-26-qvac-spike.md](docs/superpowers/notes/2026-05-26-qvac-spike.md) (spike that surfaced QVAC's actual API).
+Companion docs: [README.md](README.md) (setup + stack summary).
 
 ## LLM — Llama 3.2 1B Instruct Q4_0 (Qwen3 4B evaluated, not adopted)
 
