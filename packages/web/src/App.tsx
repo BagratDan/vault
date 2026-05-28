@@ -777,10 +777,25 @@ export function App() {
       </main>
     );
   } else {
-    // route === "ask" — the cross-folder ask/search surface.
+    // route === "ask" — the default landing: quick capture + cross-folder ask.
+    // Captures go to the per-peer Captures folder (server stamps the folderId
+    // from runtime.state.capturesFolderId; the client doesn't pass one).
     content = (
       <main className="mx-auto max-w-3xl space-y-5 p-6">
         <RouteHeader {...headerProps} />
+        <CapturePane
+          onSubmitText={(text, tags, scopes) => {
+            send({ kind: "capture.text", text, tags });
+            pendingScopes.current = scopes;
+          }}
+          onSubmitAudio={(audio, tags, scopes) => {
+            let bin = "";
+            for (let i = 0; i < audio.length; i++) bin += String.fromCharCode(audio[i]!);
+            const audioBase64 = btoa(bin);
+            send({ kind: "capture.audio", audioBase64, tags });
+            pendingScopes.current = scopes;
+          }}
+        />
         <section className="rounded-2xl bg-slate-900 p-5 shadow">
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-400">
             Ask (across all folders)
@@ -851,8 +866,8 @@ export function App() {
 
           {!answer && hits.length === 0 && (
             <p className="mt-4 text-xs text-slate-500">
-              Open a folder to capture memories, then ask a question — your local LLM answers
-              from your own notes plus anything peers have shared with you.
+              Capture a note above or add a folder of files, then ask a question — your local
+              LLM answers from your own notes plus anything peers have shared with you.
             </p>
           )}
         </section>
