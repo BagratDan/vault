@@ -78,6 +78,18 @@ export class FolderLocal {
     await this.bee.put(`memory/${m.id}`, m);
   }
 
+  async markPrivateMemoryDeleted(id: string): Promise<void> {
+    const r = await this.bee.get(`memory/${id}`);
+    if (!r) return;
+    const m = r.value as Memory;
+    const now = new Date().toISOString();
+    await this.bee.put(`memory/${id}`, {
+      ...m,
+      deletedAt: now,
+      updatedAt: now,
+    });
+  }
+
   async getPrivateMemory(id: string): Promise<Memory | null> {
     const r = await this.bee.get(`memory/${id}`);
     return r ? (r.value as Memory) : null;

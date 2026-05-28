@@ -108,20 +108,27 @@ export class Repo {
     return [...publicHits, ...privateHits];
   }
 
-  /** Soft-delete a PUBLIC (autobee) memory by stamping deletedAt. */
+  /** Soft-delete a memory by stamping deletedAt. Routes to autobee for public
+   *  memories and to FolderLocal for private ones — folderDelete must reach
+   *  both stores or private-folder contents leak after the folder is deleted. */
   async markMemoryDeleted(memoryId: string): Promise<void> {
     const m = await this.getMemory(memoryId as Ulid);
-    if (!m) return;
-    const updated = {
-      ...m,
-      deletedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    await this.append({
-      kind: "memory",
-      key: `${PREFIX.memory}${m.id}`,
-      value: updated,
-    });
+    if (m) {
+      const updated = {
+        ...m,
+        deletedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await this.append({
+        kind: "memory",
+        key: `${PREFIX.memory}${m.id}`,
+        value: updated,
+      });
+      return;
+    }
+    if (this.folderLocal) {
+      await this.folderLocal.markPrivateMemoryDeleted(memoryId);
+    }
   }
 
   /** One-time, idempotent backfill of folder + meta indexes for existing

@@ -229,7 +229,14 @@ export async function startVault(): Promise<VaultHandle> {
     async function scanConsentRequests(): Promise<void> {
       if (!runtime.store || !consentState) return;
       const selfKey = runtime.state?.selfPeerId ?? identity.peerId;
-      const repo = getRepo();
+      // Inline construction (not getRepo()) — this runs on a 1.5s setInterval
+      // started by activateVault on the boot path, which can fire before the
+      // `const getRepo` arrow at module bottom is initialized (TDZ).
+      const repo = new Repo({
+        view: runtime.store.view,
+        append: runtime.store.append,
+        ownerPeerId: identity.peerId,
+      });
       for await (const node of runtime.store.view.createReadStream({
         gte: "consentReq/",
         lt: "consentReq/~",
@@ -370,10 +377,13 @@ export async function startVault(): Promise<VaultHandle> {
           const roster = await loadRoster(runtime.store.view);
           const revoked = await loadRevoked(runtime.store.view);
           if (!roster.has(peerId) || revoked.has(peerId)) return;
+          // ownerPeerId is the canonical autobee writer key (state.selfPeerId),
+          // NOT identity.peerId — matches the new Autobee-log consent path.
+          const selfKey = runtime.state?.selfPeerId ?? identity.peerId;
           const repo = new Repo({
             view: runtime.store.view,
             append: runtime.store.append,
-            ownerPeerId: identity.peerId,
+            ownerPeerId: selfKey,
           });
           const memory = await repo.getMemory(req.memoryId as never);
           if (!memory) {
@@ -391,7 +401,7 @@ export async function startVault(): Promise<VaultHandle> {
             }
             await writeAudit({
               requesterPeerId: peerId,
-              ownerPeerId: identity.peerId,
+              ownerPeerId: selfKey,
               resourceId: req.memoryId,
               kind: "deny",
             });
@@ -402,7 +412,7 @@ export async function startVault(): Promise<VaultHandle> {
           consentState.set({
             consentRequestId: req.consentRequestId,
             requesterPeerId: peerId,
-            ownerPeerId: identity.peerId,
+            ownerPeerId: selfKey,
             memoryId: req.memoryId,
             scope: req.scope,
             requesterDisplayName,
@@ -422,7 +432,7 @@ export async function startVault(): Promise<VaultHandle> {
           });
           await writeAudit({
             requesterPeerId: peerId,
-            ownerPeerId: identity.peerId,
+            ownerPeerId: selfKey,
             resourceId: req.memoryId,
             kind: "request",
           });
