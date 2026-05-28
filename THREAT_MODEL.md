@@ -2,7 +2,7 @@
 
 This document covers the trust posture, threat model, and residual risks of Vault as shipped in v1 (Plan 1 — Foundation). Required reading for any IT director or security-conscious user evaluating whether to install Vault on a managed laptop.
 
-Companion docs: [README.md](README.md), [MODEL_TRADEOFFS.md](MODEL_TRADEOFFS.md), [docs/superpowers/specs/2026-05-25-vault-design.md § 10 + § 16](docs/superpowers/specs/2026-05-25-vault-design.md).
+Companion docs: [README.md](README.md), [MODEL_TRADEOFFS.md](MODEL_TRADEOFFS.md).
 
 ## What Vault is trying to be true to
 
@@ -148,7 +148,7 @@ These are spec-defined claims that Plan 1 doesn't yet implement. Each is honestl
 
 **Spec:** Admin issues a signed `Revocation`; peers refuse writes from the revoked peer; departed member loses access to new content.
 
-**Status:** Schema is defined. The runtime broadcast + `apply()` enforcement is scoped to Plan 2.
+**Status:** Implemented. `apply()` drops writes (and consent-request records) from revoked peers, AND the **read surface is gated**: because the Hyperswarm node is bound to the autobee writer keyPair, an inbound connection's authenticated pubkey is its roster identity, so `search.probe` and `consent.request` handlers reject any caller not in the roster or in the revoked set. A revoked peer therefore loses both write access and the ability to search or request a peer's content — closing the earlier gap where revocation gated writes only. (Earlier versions routed consent over a Hyperswarm channel keyed by a random noise pubkey unrelated to the writer key, so cross-peer consent silently never reached the owner and the probe surface was ungated; the writer-keyPair binding fixed both.)
 
 ### Hardened distribution
 
@@ -211,6 +211,27 @@ These are risks Vault cannot fully eliminate by design. Each is named here, with
 
 **Status:** This risk class **cannot occur in v1** because there's no sync at all. In Plan 2, sync ships but only for records (file bodies stay local, derivatives stay local). The threat is **eliminated by data-flow design**, not after-the-fact validation.
 
+### 4a. At-rest replication of public-folder content (Plan 4)
+
+**Risk:** Plan 4 introduces folders. A **private** folder's memories are written to an owner-local Hyperbee (`$VAULT_ROOT/local/`) and never enter the synced Autobee — they are confidential from peers at rest. A **public** folder's memory *records* (including the `body` text extracted from the file) DO replicate via Autobee to every admitted roster member, the same way Plan 1-3 memory records always have. Raw file *bytes* still never replicate (only the extracted text in the Memory record does).
+
+This means the consent gate (Plan 3) and the search-probe folder filter are **read-time controls on cooperative search**, not at-rest confidentiality. An admitted peer that inspects its own replicated Autobee view directly — rather than going through `search.probe` — can read every public-folder memory body and every typed capture (which uses the public/replicating path). The blurred-preview + per-request consent flow governs what the *UI and RPC surface* expose; it does not encrypt replicated records.
+
+The cooperative-search surface is now **roster-gated for both reads and requests**: the Hyperswarm node is bound to the autobee writer keyPair, so an inbound `search.probe` from a non-member or revoked peer returns no hits, and a consent **request** is a signed, roster-gated record on the shared log (a non-member can't write one). A consent **approval** carries content and is delivered **point-to-point to the single requester** — never broadcast to the roster — so granting one peer does not expose the content to the others. None of this changes the at-rest posture above: admitted peers still hold public-folder bodies in cleartext in their own replicated view.
+
+**Mitigation / posture:**
+
+- **Private folders are the at-rest confidentiality boundary.** Anything that must not be readable by an admitted-but-curious peer goes in a private folder (storage-gated — never replicates). This is enforced structurally in `Repo.putMemoryByVisibility` and proven by `packages/sync/tests/two-peer-folder.test.ts` (the private memory id is never present in the synced view).
+- **Public folders are explicitly a sharing surface.** Marking a folder public is the user stating "admitted peers may search this." The consent gate then narrows *delivery* (blurred preview → snippet/file only on approval), but the owner should treat a public folder's contents as readable-at-rest by the roster.
+- Encryption-at-rest of replicated records (so even raw-view inspection yields ciphertext) is **deferred** — it requires per-record envelope encryption keyed to the roster and is sketched as future work. v1-v4 do not claim it.
+
+**Status:** Honestly bounded. The "private NEVER reaches a peer" guarantee holds for private folders (two gates, tested). The "public folder + per-memory consent" model is a *cooperative-search* control, documented here so a reviewer doesn't over-read the consent UI as at-rest encryption.
+
+**Known limitations that follow from this model (Plan 4):**
+
+- **Visibility toggle is not retroactive.** Flipping a folder public→private leaves already-replicated memories in peers' Autobee views; the owner's own probe handler stops serving them (folder is now private) but the bytes a peer already replicated are not recalled. Re-create the folder as private to fully re-route. Documented in the README.
+- **Default "Captures" folder is public.** Typed/recorded captures replicate like any public memory (as in Plans 1-3). To keep a note fully node-local, capture it into a folder marked private.
+
 ### 5. Cross-origin attack via the user's browser
 
 **Risk:** A user visits `evil.example.com` in another tab. The site's JavaScript opens a WebSocket to `ws://127.0.0.1:7421/ws` and tries to drain memories.
@@ -249,7 +270,7 @@ These are risks Vault cannot fully eliminate by design. Each is named here, with
 
 ## How a CISO would verify Vault for their firm
 
-1. **Read this document and `docs/superpowers/specs/2026-05-25-vault-design.md` § 10.**
+1. **Read this document.**
 2. **Run** `pnpm lint && pnpm -r test && pnpm e2e`. All three pass on a fresh clone.
 3. **Run** `grep -rE "(fetch\(|XMLHttpRequest|node:http|axios)" packages/ e2e/ --include='*.ts' --include='*.tsx' --include='*.js' --include='*.mjs' | grep -v packages/net/`. Expect zero substantive matches.
 4. **Run** `grep -rE "telemetry|analytics|sentry|posthog" packages/ e2e/` (excluding node_modules). Expect empty.

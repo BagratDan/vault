@@ -22,6 +22,7 @@ vi.mock("@qvac/sdk", () => ({
     };
   }),
   LLAMA_3_2_1B_INST_Q4_0: { id: "llm" },
+  QWEN3_4B_INST_Q4_K_M: { id: "llm" },
   EMBEDDINGGEMMA_300M_Q4_0: { id: "emb" },
   TTS_EN_ES_CHATTERBOX_Q4F16: { id: "tts" },
   PARAKEET_TDT_ENCODER_INT8: { id: "p-enc" },
@@ -64,6 +65,7 @@ describe("extractFromText", () => {
       sourceRecordId: "01J0".padEnd(26, "A") as never,
       text: "Sarah said she'd ship the migration by Friday.",
       ownerPeerId,
+      folderId: "01J0CAPTVRES000000000000AA",
     });
     expect(out.memory.summary).toMatch(/Sarah/);
     expect(out.memory.confidence).toBeCloseTo(0.92);
@@ -91,6 +93,7 @@ describe("extractFromText", () => {
       sourceRecordId: "01J0".padEnd(26, "A") as never,
       text: "noisy input",
       ownerPeerId: "a".repeat(64),
+      folderId: "01J0CAPTVRES000000000000AA",
     });
     expect(out.memory.summary).toBe("fallback");
     expect(completionCalls).toBe(2);
@@ -102,9 +105,41 @@ describe("extractFromText", () => {
       sourceRecordId: "01J0".padEnd(26, "A") as never,
       text: "The raw text we will store.",
       ownerPeerId: "a".repeat(64),
+      folderId: "01J0CAPTVRES000000000000AA",
     });
     expect(out.memory.confidence).toBe(0.1);
     expect(out.memory.body).toBe("The raw text we will store.");
     expect(completionCalls).toBe(2);
+  });
+
+  // Regression: a single bad LLM event (non-ISO startsAt) used to throw
+  // at Repo.putEvent and abort the entire capture, losing the memory.
+  // We now drop invalid derived entities and keep the memory.
+  it("drops events with non-ISO startsAt instead of throwing", async () => {
+    completionResponses = [
+      JSON.stringify({
+        summary: "Sarah promised the migration by Friday",
+        body: "Sarah said she'd ship the migration by Friday.",
+        confidence: 0.92,
+        tags: ["commitment"],
+        people: [],
+        places: [],
+        events: [
+          { title: "Ship migration", startsAt: "by Friday" }, // bad
+          { title: "Demo", startsAt: "2026-05-30T17:00:00.000Z" }, // good
+        ],
+        tasks: [],
+        externalRefs: [],
+      }),
+    ];
+    const out = await extractFromText(pool, {
+      sourceRecordId: "01J0".padEnd(26, "A") as never,
+      text: "Sarah said she'd ship the migration by Friday.",
+      ownerPeerId: "a".repeat(64),
+      folderId: "01J0CAPTVRES000000000000AA",
+    });
+    expect(out.memory.summary).toMatch(/Sarah/);
+    expect(out.events).toHaveLength(1);
+    expect(out.events[0]!.title).toBe("Demo");
   });
 });

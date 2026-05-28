@@ -7,6 +7,7 @@ import {
   externalRefShape,
   relationshipShape,
   sourceRecordShape,
+  folderPublicShape,
   type Memory,
   type Person,
   type Place,
@@ -15,8 +16,12 @@ import {
   type ExternalRef,
   type Relationship,
   type SourceRecord,
+  type FolderPublic,
+  type FolderVisibility,
   type Ulid,
 } from "@vault/domain";
+import type { FolderLocal } from "./folder-local.js";
+import type { Indexes } from "./indexes.js";
 
 const PREFIX = {
   memory: "mem/",
@@ -27,12 +32,10 @@ const PREFIX = {
   externalRef: "ref/",
   relationship: "rel/",
   source: "src/",
+  folder: "folder/",
 } as const;
 
-// Minimal Hyperbee interface we depend on. Avoids pulling in the
-// untyped Hyperbee module's surface.
-interface BeeLike {
-  put(key: string, value: unknown): Promise<void>;
+interface View {
   get(key: string): Promise<{ value: unknown } | null>;
   createReadStream(opts: {
     gte?: string;
@@ -40,17 +43,30 @@ interface BeeLike {
   }): AsyncIterable<{ key: string; value: unknown }>;
 }
 
-export class Repo {
-  private readonly bee: BeeLike;
+export interface RepoDeps {
+  view: View;
+  append: (op: unknown) => Promise<void>;
+  ownerPeerId: string;
+  folderLocal?: FolderLocal | null;
+}
 
-  constructor(bee: unknown) {
-    this.bee = bee as BeeLike;
+export class Repo {
+  private readonly view: View;
+  private readonly append: (op: unknown) => Promise<void>;
+  private readonly ownerPeerId: string;
+  private readonly folderLocal: FolderLocal | null;
+
+  constructor(deps: RepoDeps) {
+    this.view = deps.view;
+    this.append = deps.append;
+    this.ownerPeerId = deps.ownerPeerId;
+    this.folderLocal = deps.folderLocal ?? null;
   }
 
   // Memory ----------------------------------------------------------------
   async putMemory(m: Memory): Promise<void> {
     memoryShape.parse(m);
-    await this.bee.put(`${PREFIX.memory}${m.id}`, m);
+    await this.append({ kind: "memory", key: `${PREFIX.memory}${m.id}`, value: m });
   }
   async getMemory(id: Ulid): Promise<Memory | null> {
     return this.getOne(`${PREFIX.memory}${id}`, (raw) => memoryShape.parse(raw));
@@ -59,10 +75,105 @@ export class Repo {
     return this.listPrefix(PREFIX.memory, (raw) => memoryShape.parse(raw));
   }
 
+  /**
+   * Write a memory to the correct storage tier based on its folder's
+   * visibility. PRIVATE folder memories go to the owner-local Hyperbee
+   * (FolderLocal) and NEVER reach Autobee. PUBLIC folder memories go
+   * through the normal autobee append. This is the storage-tier half of
+   * the two-gate privacy model (the other gate is the search-probe filter).
+   */
+  async putMemoryByVisibility(m: Memory, visibility: FolderVisibility): Promise<void> {
+    if (visibility === "private") {
+      if (!this.folderLocal) {
+        throw new Error("putMemoryByVisibility: private folder requires FolderLocal");
+      }
+      await this.folderLocal.putPrivateMemory(m);
+      return;
+    }
+    await this.putMemory(m); // existing autobee path
+  }
+
+  /** Union the owner's public (autobee, via folder index) + private (FolderLocal) memories. */
+  async listMemoriesInFolder(folderId: string, indexes: Indexes): Promise<Memory[]> {
+    const ids = await indexes.memoryIdsForFolder(folderId);
+    const publicHits: Memory[] = [];
+    for (const id of ids) {
+      const m = await this.getMemory(id as Ulid);
+      if (m) publicHits.push(m);
+    }
+    let privateHits: Memory[] = [];
+    if (this.folderLocal) {
+      privateHits = await this.folderLocal.listPrivateMemoriesByFolder(folderId);
+    }
+    return [...publicHits, ...privateHits];
+  }
+
+  /** Soft-delete a memory by stamping deletedAt. Routes to autobee for public
+   *  memories and to FolderLocal for private ones — folderDelete must reach
+   *  both stores or private-folder contents leak after the folder is deleted. */
+  async markMemoryDeleted(memoryId: string): Promise<void> {
+    const m = await this.getMemory(memoryId as Ulid);
+    if (m) {
+      const updated = {
+        ...m,
+        deletedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await this.append({
+        kind: "memory",
+        key: `${PREFIX.memory}${m.id}`,
+        value: updated,
+      });
+      return;
+    }
+    if (this.folderLocal) {
+      await this.folderLocal.markPrivateMemoryDeleted(memoryId);
+    }
+  }
+
+  /** One-time, idempotent backfill of folder + meta indexes for existing
+   *  public memories. A sentinel key short-circuits the already-complete
+   *  path in O(1); the per-memory skip below still allows safe resume if a
+   *  prior run was interrupted before the sentinel was written. Edge backfill
+   *  is intentionally skipped: pre-existing memories lack persisted entity ids
+   *  to link, so edges are only written for new captures going forward. */
+  async backfillIndexes(indexes: Indexes): Promise<void> {
+    const sentinel = await this.view.get("meta/__backfill_v1");
+    if (sentinel) return; // fully backfilled on a prior run — O(1) fast path
+    const memories = await this.listMemories();
+    for (const m of memories) {
+      const existing = await indexes.metaForMemories([m.id]);
+      if (existing.has(m.id)) continue; // already indexed — resume safety
+      await indexes.indexFolderMembership(m.folderId, m.id);
+      await indexes.indexMeta(m.id, {
+        tags: m.tags,
+        ownerPeerId: m.ownerPeerId,
+        createdAt: m.createdAt,
+        personIds: [],
+      });
+    }
+    // Mark complete so subsequent activations skip the per-memory scan.
+    await this.append({ kind: "meta", key: "meta/__backfill_v1", value: { done: true } });
+  }
+
+  // Folder (PUBLIC subset, synced) ----------------------------------------
+  async putFolderPublic(folderPublic: FolderPublic): Promise<void> {
+    folderPublicShape.parse(folderPublic);
+    await this.append({
+      kind: "folder",
+      key: `${PREFIX.folder}${folderPublic.id}`,
+      value: folderPublic,
+    });
+  }
+
+  async listFoldersPublic(): Promise<FolderPublic[]> {
+    return this.listPrefix(PREFIX.folder, (raw) => folderPublicShape.parse(raw));
+  }
+
   // Person ----------------------------------------------------------------
   async putPerson(p: Person): Promise<void> {
     personShape.parse(p);
-    await this.bee.put(`${PREFIX.person}${p.id}`, p);
+    await this.append({ kind: "person", key: `${PREFIX.person}${p.id}`, value: p });
   }
   async listPersons(): Promise<Person[]> {
     return this.listPrefix(PREFIX.person, (raw) => personShape.parse(raw));
@@ -71,7 +182,7 @@ export class Repo {
   // Place -----------------------------------------------------------------
   async putPlace(p: Place): Promise<void> {
     placeShape.parse(p);
-    await this.bee.put(`${PREFIX.place}${p.id}`, p);
+    await this.append({ kind: "place", key: `${PREFIX.place}${p.id}`, value: p });
   }
   async listPlaces(): Promise<Place[]> {
     return this.listPrefix(PREFIX.place, (raw) => placeShape.parse(raw));
@@ -80,7 +191,7 @@ export class Repo {
   // Event -----------------------------------------------------------------
   async putEvent(e: Event): Promise<void> {
     eventShape.parse(e);
-    await this.bee.put(`${PREFIX.event}${e.id}`, e);
+    await this.append({ kind: "event", key: `${PREFIX.event}${e.id}`, value: e });
   }
   async listEvents(): Promise<Event[]> {
     return this.listPrefix(PREFIX.event, (raw) => eventShape.parse(raw));
@@ -89,7 +200,7 @@ export class Repo {
   // Task ------------------------------------------------------------------
   async putTask(t: Task): Promise<void> {
     taskShape.parse(t);
-    await this.bee.put(`${PREFIX.task}${t.id}`, t);
+    await this.append({ kind: "task", key: `${PREFIX.task}${t.id}`, value: t });
   }
   async listTasks(): Promise<Task[]> {
     return this.listPrefix(PREFIX.task, (raw) => taskShape.parse(raw));
@@ -98,19 +209,19 @@ export class Repo {
   // ExternalRef -----------------------------------------------------------
   async putExternalRef(r: ExternalRef): Promise<void> {
     externalRefShape.parse(r);
-    await this.bee.put(`${PREFIX.externalRef}${r.id}`, r);
+    await this.append({ kind: "external-ref", key: `${PREFIX.externalRef}${r.id}`, value: r });
   }
 
   // Relationship ----------------------------------------------------------
   async putRelationship(r: Relationship): Promise<void> {
     relationshipShape.parse(r);
-    await this.bee.put(`${PREFIX.relationship}${r.id}`, r);
+    await this.append({ kind: "relationship", key: `${PREFIX.relationship}${r.id}`, value: r });
   }
 
   // SourceRecord ----------------------------------------------------------
   async putSourceRecord(s: SourceRecord): Promise<void> {
     sourceRecordShape.parse(s);
-    await this.bee.put(`${PREFIX.source}${s.id}`, s);
+    await this.append({ kind: "source-record", key: `${PREFIX.source}${s.id}`, value: s });
   }
   async getSourceRecord(id: Ulid): Promise<SourceRecord | null> {
     return this.getOne(`${PREFIX.source}${id}`, (raw) => sourceRecordShape.parse(raw));
@@ -118,14 +229,14 @@ export class Repo {
 
   // -----------------------------------------------------------------------
   private async getOne<T>(key: string, parse: (raw: unknown) => T): Promise<T | null> {
-    const node = await this.bee.get(key);
+    const node = await this.view.get(key);
     if (!node) return null;
     return parse(node.value);
   }
 
   private async listPrefix<T>(prefix: string, parse: (raw: unknown) => T): Promise<T[]> {
     const results: T[] = [];
-    for await (const node of this.bee.createReadStream({
+    for await (const node of this.view.createReadStream({
       gte: prefix,
       lt: prefix + "~",
     })) {

@@ -2,28 +2,43 @@
 
 This document covers the substantive AI and infrastructure choices made in Plan 1 of Vault, the reasoning behind each, and the alternatives that were considered. Required submission deliverable per the Tether take-home.
 
-Companion docs: [README.md](README.md) (setup + stack summary), [docs/superpowers/specs/2026-05-25-vault-design.md](docs/superpowers/specs/2026-05-25-vault-design.md) (full architectural spec), [docs/superpowers/notes/2026-05-26-qvac-spike.md](docs/superpowers/notes/2026-05-26-qvac-spike.md) (spike that surfaced QVAC's actual API).
+Companion docs: [README.md](README.md) (setup + stack summary).
 
-## LLM — Llama 3.2 1B Instruct Q4_0
+## LLM — Llama 3.2 1B Instruct Q4_0 (Qwen3 4B evaluated, not adopted)
 
-**Chosen:** `LLAMA_3_2_1B_INST_Q4_0` (single-file constant; ~700 MB on disk).
+**Chosen:** `LLAMA_3_2_1B_INST_Q4_0` (single-file constant; ~700 MB on disk, ~1.1 GB resident with the 4096-token KV cache).
 
 **Why:**
 
-- Fits in our 8–16 GB RAM budget with room for STT and embed to co-reside.
-- Quantization (Q4_0) preserves enough fidelity for our extraction prompt (structured JSON output) and answer generation (snippet-grounded short prose).
-- Tether's QVAC v0.11.0 registry pins it as a first-class single-file constant — meaning load is one `loadModel` call, not the multi-file shard variant.
-- Open-weights via Unsloth's repacked GGUF; Tether ships the registry pointer.
+- Fits the 8–16 GB RAM budget with room for STT and embed to co-reside.
+- Q4_0 quantization preserves enough fidelity for the extraction prompt (structured JSON) and snippet-grounded answer generation.
+- First-class single-file registry constant → one `loadModel` call (not the multi-file shard variant).
+- **Small download (~700 MB)** — pulls over QVAC's P2P Holepunch registry in a tolerable window. This turned out to be decisive (see below).
 
-**Alternatives considered:**
+### Qwen3 4B was evaluated and reverted
 
-- `LLAMA_TOOL_CALLING_1B_INST_Q4_K` — the tool-calling variant. Slightly larger; we don't actually use tool-calling in Plan 1 (the extraction prompt asks the model to emit a JSON object directly, not call tools). Not worth the size.
-- `QWEN3_4B_Q4_K_M` — better quality but 4× the size; pushes us over the spec's 8 GB target on smaller machines.
-- `LLAMA_3_2_1B_INST_Q4_0_SHARD` — multi-file variant. Same model, more orchestration overhead at load time. No win for our use case.
-- `BITNET_1B_INST_TQ2_0` — newer / smaller / faster but the extraction-quality risk on structured JSON output was unverified within the take-home window. The dedup pipeline + low-confidence fallback would mitigate hallucinations, but the spec's "LLM Robustness" requirement is better served by a known-good model.
-- `GPT_OSS_120B_INST_*` — exists in the registry but absurdly out of budget for consumer hardware.
+The 1B is a **weak reasoner**: in live testing it rambled on summaries and could not answer count/metadata questions (e.g. "how many files are in the folder") *even when the count was injected into its prompt*. (A separate context-overflow bug — the LLM ran at QVAC's default `ctx_size: 1024` and overflowed on multi-snippet prompts — was fixed independently by raising `ctx_size` to 4096 and budgeting the prompt; that fix is shipped and is model-agnostic.)
 
-**Risk we accepted:** 1 B parameters is small. Extraction failures are expected on noisy input; the Zod-validated retry + confidence=0.1 raw-text fallback in [`packages/ai/src/extract.ts`](packages/ai/src/extract.ts) is the mitigation. Tested with 3 unit cases covering well-formed output, schema-failure-then-retry-succeeds, and schema-failure-twice-fallback-to-raw.
+We prototyped switching to **`QWEN3_4B_INST_Q4_K_M`** for materially stronger reasoning. The code change was clean and fully test-green, but we **reverted it**: the model is **~2.5 GB**, and QVAC pulls models over a P2P Holepunch registry at ~0.6–1.7 MB/s on the test network — a first-load of **30–40+ minutes**, which is impractical for the demo/submission. The 700 MB Llama 1B pulls far faster. **The blocker was download/distribution time, not reasoning quality or memory** (Qwen3 4B fits comfortably at ~3.2 GB resident on the 16 GB M4).
+
+The switch remains a **one-line change** (`VAULT_MODELS.llm`) if a faster model-distribution path (CDN mirror, pre-seeded cache) becomes available — the SDK shim and the `@vault/ai` + E2E test mocks already declare `QWEN3_4B_INST_Q4_K_M`, so re-enabling needs only the constant swap.
+
+**Candidate comparison (registry LLMs viable on a 16 GB Apple M4):**
+
+| Registry constant | Weights (Q4) | + KV @4096 | Reasoning | ~tok/s (M4) | Download |
+|---|---|---|---|---|---|
+| **`LLAMA_3_2_1B_INST_Q4_0` (shipped)** | ~0.8 GB | ~1.1 GB | weak | 40–60 | ~700 MB (fast) |
+| `QWEN3_1_7B_INST_Q4` | ~1.2 GB | ~1.6 GB | good | 30–45 | ~1.2 GB |
+| `QWEN3_4B_INST_Q4_K_M` (prototyped) | ~2.5 GB | ~3.2 GB | strong (≈GPT-3.5) | 15–25 | ~2.5 GB (slow over P2P) |
+| `GEMMA_4B_IT_Q4_1` | ~2.8 GB | ~3.6 GB | strong, more verbose | 15–22 | ~2.8 GB |
+| `QWEN3_8B_INST_Q4_K_M` | ~5 GB | ~6.5 GB | strongest | 8–14 | ~5 GB |
+| `GPT_OSS_20B_INST_Q4_K_M` | ~12 GB | — | excellent | too big for 16 GB | — |
+
+Size figures are standard GGUF quant footprints (the registry carries no inline size metadata); tok/s are Apple M4 (10-core, unified memory) estimates. The `ModelPool` "one large model resident" rule means the LLM co-resides only with the small embed model (~0.3 GB) — TTS is evicted when the LLM loads.
+
+**If a larger LLM is wanted but the 4B download is too slow:** `QWEN3_1_7B_INST_Q4` (~1.2 GB) is the middle ground — roughly half the download, a real reasoning gain over the 1B, ~1.6 GB resident.
+
+**Risk we accepted:** 1 B parameters is small — weak on summarization and meta-questions; the folder-stats injection in the Ask path helps count questions, but answer prose is plainer than a 4B would produce. Extraction failures on noisy input are mitigated by the Zod-validated retry + confidence=0.1 raw-text fallback in [`packages/ai/src/extract.ts`](packages/ai/src/extract.ts).
 
 ## STT — Parakeet TDT INT8
 

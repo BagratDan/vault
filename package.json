@@ -13,6 +13,8 @@
     "test:unit": "pnpm -r --parallel test:unit",
     "test:int": "pnpm -r --parallel test:int",
     "e2e": "pnpm --filter @vault/e2e test",
+    "e2e:multipeer": "pnpm --filter @vault/e2e test:multipeer",
+    "e2e:consent": "pnpm --filter @vault/e2e test:consent",
     "lint": "eslint packages/ tools/ e2e/",
     "typecheck": "pnpm -r --parallel typecheck",
     "dev": "pnpm --filter @vault/app dev",

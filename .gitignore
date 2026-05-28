@@ -1,8 +1,11 @@
-# Private chat transcripts — not for the public repo.
-# These contain raw Claude Code session JSONL and the rendered conversation
-# that produced the design spec. The spec itself is the canonical artifact.
+# Internal design + planning docs and chat transcripts — not for the public repo.
+# These contain raw Claude Code session JSONL, the rendered conversation, and
+# the design specs / implementation plans that produced the build. The shipped
+# code, README, MODEL_TRADEOFFS, and THREAT_MODEL are the canonical artifacts.
+/docs/
 /*.jsonl
 /qvac-chat-transcript.md
+/CLAUDE.md
 
 # Node / pnpm
 node_modules/

@@ -81,7 +81,34 @@ beforeAll(async () => {
   authToken = (
     await fs.readFile(path.join(vaultRoot, ".ws-token"), "utf-8")
   ).trim();
-}, 30_000);
+
+  // Plan 2: capture/search/tts are gated on an active vault. Create one
+  // up-front so the per-test capture flows work without each test having
+  // to bootstrap. No peers connect here — the swarm.join activation
+  // happens but stays connection-less in this single-process test.
+  const setupWs = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${authToken}`);
+  await new Promise<void>((res, rej) => {
+    setupWs.once("open", () => res());
+    setupWs.once("error", rej);
+  });
+  await new Promise<void>((res, rej) => {
+    const onMessage = (raw: WebSocket.RawData) => {
+      const msg = JSON.parse(String(raw)) as { kind: string };
+      if (msg.kind === "vault.created") {
+        setupWs.off("message", onMessage);
+        res();
+      } else if (msg.kind === "error") {
+        setupWs.off("message", onMessage);
+        rej(new Error(`vault.create failed: ${JSON.stringify(msg)}`));
+      }
+    };
+    setupWs.on("message", onMessage);
+    setupWs.send(
+      JSON.stringify({ kind: "vault.create", displayName: "E2E Vault" })
+    );
+  });
+  setupWs.close();
+}, 60_000);
 
 afterAll(async () => {
   if (child && !child.killed) {

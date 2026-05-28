@@ -15,8 +15,7 @@
   },
   "dependencies": {
     "react": "^18.3.0",
-    "react-dom": "^18.3.0",
-    "@vault/domain": "workspace:*"
+    "react-dom": "^18.3.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.0",

@@ -38,4 +38,87 @@ describe("VaultFs", () => {
     const exists = await fs.stat(path.join(root, "a/b/c.txt"));
     expect(exists.isFile()).toBe(true);
   });
+
+  it("bootstraps when VAULT_ROOT does not exist yet", async () => {
+    const fresh = path.join(os.tmpdir(), `vault-fs-fresh-${Date.now()}`);
+    const api = new VaultFs(fresh);
+    await api.ensureDir("data");
+    const st = await fs.stat(path.join(fresh, "data"));
+    expect(st.isDirectory()).toBe(true);
+    await fs.rm(fresh, { recursive: true, force: true });
+  });
+});
+
+describe("VaultFs.resolveSafeAbsolute", () => {
+  // resolveSafeAbsolute does not depend on VAULT_ROOT, so any root works.
+  const fsApi = new VaultFs(os.tmpdir());
+
+  it("accepts a path inside the user's home", async () => {
+    const home = os.homedir();
+    await expect(fsApi.resolveSafeAbsolute(home)).resolves.toBe(home);
+  });
+
+  it("rejects /etc/passwd", async () => {
+    await expect(fsApi.resolveSafeAbsolute("/etc/passwd")).rejects.toThrow(
+      /refuse-list/
+    );
+  });
+
+  it("rejects /System/Library", async () => {
+    await expect(fsApi.resolveSafeAbsolute("/System/Library")).rejects.toThrow(
+      /refuse-list/
+    );
+  });
+
+  it("rejects a non-absolute path", async () => {
+    await expect(fsApi.resolveSafeAbsolute("relative/path")).rejects.toThrow(
+      /not absolute/
+    );
+  });
+
+  it("rejects a path whose ancestor is outside $HOME", async () => {
+    await expect(fsApi.resolveSafeAbsolute("/tmp/some/dir")).rejects.toThrow(
+      /outside \$HOME/
+    );
+  });
+
+  // Regression: macOS Finder "Copy as Pathname" / title-bar drag prepends a
+  // U+202A LEFT-TO-RIGHT EMBEDDING (and often a trailing U+202C). The visible
+  // text looks absolute but path.isAbsolute returned false → "not absolute".
+  it("strips a leading U+202A LRE (macOS Finder copy)", async () => {
+    const home = os.homedir();
+    const mangled = "‪" + home + "‬";
+    await expect(fsApi.resolveSafeAbsolute(mangled)).resolves.toBe(home);
+  });
+
+  it("strips embedded bidi/zero-width marks and surrounding whitespace", async () => {
+    const home = os.homedir();
+    const mangled = "  ​" + home + "‎  ";
+    await expect(fsApi.resolveSafeAbsolute(mangled)).resolves.toBe(home);
+  });
+
+  it("strips matched surrounding quotes", async () => {
+    const home = os.homedir();
+    await expect(fsApi.resolveSafeAbsolute(`"${home}"`)).resolves.toBe(home);
+  });
+
+  it("expands a leading ~ to the home directory", async () => {
+    const home = os.homedir();
+    await expect(fsApi.resolveSafeAbsolute("~")).resolves.toBe(home);
+  });
+
+  it("expands a leading ~/subdir to under home", async () => {
+    const home = os.homedir();
+    // "~/Documents" → join(home, "/Documents"). Use a subdir that exists under
+    // every home: the home dir itself via "~/." normalizes back to home.
+    await expect(fsApi.resolveSafeAbsolute("~/.")).resolves.toBe(
+      path.join(home, "/.")
+    );
+  });
+
+  it("still rejects a genuinely relative path after sanitizing", async () => {
+    await expect(
+      fsApi.resolveSafeAbsolute("‪relative/path")
+    ).rejects.toThrow(/not absolute/);
+  });
 });

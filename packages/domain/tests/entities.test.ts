@@ -30,6 +30,7 @@ describe("entity schemas", () => {
       confidence: 0.92,
       tags: ["auth", "commitment"],
       requestableScopes: ["snippet", "file"] as const,
+      folderId: "01J0CAPTVRES000000000000AA",
     };
     expect(memoryShape.safeParse(m).success).toBe(true);
   });
@@ -43,6 +44,7 @@ describe("entity schemas", () => {
       confidence: -0.1,
       tags: [],
       requestableScopes: [],
+      folderId: "01J0CAPTVRES000000000000AA",
     };
     expect(memoryShape.safeParse(m).success).toBe(false);
   });
@@ -56,6 +58,7 @@ describe("entity schemas", () => {
       confidence: 1,
       tags: [],
       requestableScopes: ["snippet", "bogus"],
+      folderId: "01J0CAPTVRES000000000000AA",
     };
     expect(memoryShape.safeParse(m).success).toBe(false);
   });
@@ -128,6 +131,8 @@ describe("entity schemas", () => {
       path: "/vault/files/x.pdf",
       mime: "application/pdf",
       hash: "sha256:" + "a".repeat(64),
+      size: 1024,
+      lastModified: "2026-05-26T10:00:00.000Z",
     };
     expect(sourceRecordShape.safeParse(s).success).toBe(true);
   });

@@ -15,6 +15,7 @@ export function createWsClient(opts: WsClientOptions): WsClient {
   const Impl = opts.wsImpl ?? WebSocket;
   const socket = new Impl(opts.url);
   const handlers = new Set<(m: ServerMessage) => void>();
+  const pending: string[] = [];
 
   socket.onmessage = (ev: MessageEvent) => {
     let parsed: ServerMessage;
@@ -26,8 +27,19 @@ export function createWsClient(opts: WsClientOptions): WsClient {
     for (const h of handlers) h(parsed);
   };
 
+  socket.onopen = () => {
+    while (pending.length > 0) socket.send(pending.shift()!);
+  };
+
   return {
-    send: (msg) => socket.send(JSON.stringify(msg)),
+    send: (msg) => {
+      const data = JSON.stringify(msg);
+      if (socket.readyState === socket.OPEN) {
+        socket.send(data);
+      } else {
+        pending.push(data);
+      }
+    },
     onMessage: (h) => {
       handlers.add(h);
       return () => {

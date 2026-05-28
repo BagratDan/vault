@@ -20,6 +20,7 @@ vi.mock("@qvac/sdk", () => ({
     };
   }),
   LLAMA_3_2_1B_INST_Q4_0: { id: "llm" },
+  QWEN3_4B_INST_Q4_K_M: { id: "llm" },
   EMBEDDINGGEMMA_300M_Q4_0: { id: "emb" },
   TTS_EN_ES_CHATTERBOX_Q4F16: { id: "tts" },
   PARAKEET_TDT_ENCODER_INT8: { id: "p-enc" },

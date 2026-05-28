@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run --dir tests --exclude '**/e2e2-multipeer.spec.ts' --exclude '**/e2e3-consent.spec.ts'",
+    "test:multipeer": "vitest run e2e2-multipeer.spec.ts",
+    "test:consent": "vitest run e2e3-consent.spec.ts",
     "test:playwright": "playwright test"
   },
   "dependencies": {

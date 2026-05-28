@@ -1,6 +1,11 @@
 import { z } from "zod";
 import {
   newUlid,
+  personShape,
+  placeShape,
+  eventShape,
+  taskShape,
+  externalRefShape,
   type Memory,
   type Person,
   type Place,
@@ -61,6 +66,7 @@ export interface ExtractInput {
   sourceRecordId: Ulid;
   text: string;
   ownerPeerId: string;
+  folderId: string;
 }
 
 export interface ExtractionResult {
@@ -99,35 +105,64 @@ function buildResult(
     confidence: ext.confidence,
     tags: ext.tags,
     requestableScopes: ["metadata", "snippet", "file"],
+    folderId: input.folderId,
   };
-  const people: Person[] = ext.people.map((p) => ({
+  // The LLM-extraction schema is intentionally looser than the strict
+  // domain shapes (e.g. extractionShape.events[].startsAt is z.string(),
+  // but eventShape.startsAt requires a regex-matched ISO timestamp).
+  // Filter out per-entity shape failures here so one bad event/task does
+  // NOT abort the whole capture. The memory itself is the load-bearing
+  // record; derived entities are lossy by design.
+  const people = filterByShape(personShape, ext.people.map((p) => ({
     ...makeBase(input.ownerPeerId),
     displayName: p.displayName,
     aliases: p.aliases,
-  }));
-  const places: Place[] = ext.places.map((p) => ({
+  })), "person");
+  const places = filterByShape(placeShape, ext.places.map((p) => ({
     ...makeBase(input.ownerPeerId),
     name: p.name,
-  }));
-  const events: Event[] = ext.events.map((e) => ({
+  })), "place");
+  const events = filterByShape(eventShape, ext.events.map((e) => ({
     ...makeBase(input.ownerPeerId),
     title: e.title,
     startsAt: e.startsAt,
     ...(e.endsAt ? { endsAt: e.endsAt } : {}),
-  }));
-  const tasks: Task[] = ext.tasks.map((t) => ({
+  })), "event");
+  const tasks = filterByShape(taskShape, ext.tasks.map((t) => ({
     ...makeBase(input.ownerPeerId),
     title: t.title,
     status: t.status,
     ...(t.dueAt ? { dueAt: t.dueAt } : {}),
-  }));
-  const externalRefs: ExternalRef[] = ext.externalRefs.map((r) => ({
+  })), "task");
+  const externalRefs = filterByShape(externalRefShape, ext.externalRefs.map((r) => ({
     ...makeBase(input.ownerPeerId),
     system: r.system,
     externalId: r.externalId,
     ...(r.url ? { url: r.url } : {}),
-  }));
+  })), "externalRef");
   return { memory, people, places, events, tasks, externalRefs };
+}
+
+// The LLM-extraction schema is intentionally looser than the strict domain
+// shapes (e.g. extractionShape.events[].startsAt is z.string(), while
+// eventShape.startsAt requires regex-matched ISO). filterByShape drops
+// per-entity failures with a warning so one bad event/task doesn't abort
+// the whole capture. Memory itself is built from server-side timestamps
+// and never invalidates.
+function filterByShape<T>(shape: z.ZodType<T>, values: readonly unknown[], kind: string): T[] {
+  const out: T[] = [];
+  for (const v of values) {
+    const r = shape.safeParse(v);
+    if (r.success) {
+      out.push(r.data);
+    } else {
+      console.warn(
+        `[vault] dropping invalid ${kind} from extraction:`,
+        r.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")
+      );
+    }
+  }
+  return out;
 }
 
 export async function extractFromText(
@@ -161,6 +196,7 @@ export async function extractFromText(
       confidence: 0.1,
       tags: [],
       requestableScopes: ["metadata", "snippet", "file"],
+      folderId: input.folderId,
     };
     return {
       memory: fallback,

@@ -3,18 +3,74 @@ import {
   type ClientMessage,
   type ServerMessage,
 } from "./messages.js";
-import type { CaptureDeps } from "./routes/capture.js";
-import type { SearchDeps } from "./routes/search.js";
-import type { MemoryDeps } from "./routes/memory.js";
-import type { TtsDeps } from "./routes/tts.js";
+import type { VaultRuntime } from "./routes/vault.js";
+import type { VaultFs } from "./vault-fs.js";
+import type { ModelPool } from "@vault/ai";
+import type { Workspace } from "@vault/retrieval";
+import {
+  signCanonical,
+  type AuditLog,
+  type Repo,
+  type Indexes,
+  type Scope,
+  type FolderLocal,
+} from "@vault/sync";
+import type { ConsentEvent } from "@vault/domain";
 import { captureText, captureAudio } from "./routes/capture.js";
 import { runSearch } from "./routes/search.js";
 import { getMemory } from "./routes/memory.js";
+import { reindexAllMemories } from "./routes/reindex.js";
 import { streamTts } from "./routes/tts.js";
-import { complete, type ChatMessage } from "@vault/ai";
+import * as vaultRoutes from "./routes/vault.js";
+import {
+  consentRequest as consentRequestRoute,
+  consentRespond as consentRespondRoute,
+  consentListPending as consentListPendingRoute,
+  type ConsentDeps,
+} from "./routes/consent.js";
+import type { ConsentState } from "./consent-state.js";
+import * as folderRoutes from "./routes/folder.js";
+import {
+  complete,
+  buildAnswerContext,
+  buildFolderSummaryContext,
+  classifyAskIntent,
+  FOLDER_SUMMARY_SYSTEM_PROMPT,
+  type ChatMessage,
+} from "@vault/ai";
 import { newUlid, type Ulid } from "@vault/domain";
 
-export interface BridgeDeps extends CaptureDeps, SearchDeps, MemoryDeps, TtsDeps {}
+/**
+ * BridgeDeps holds the long-lived process state plus FACTORIES for
+ * vault-specific singletons (Repo, Indexes). The factories throw if the
+ * vault isn't active yet — every route handler that needs them does so
+ * lazily, so commands like vault.create/vault.status work before any
+ * Autobee store is open.
+ */
+export interface BridgeDeps {
+  pool: ModelPool;
+  workspace: Workspace;
+  fs: VaultFs;
+  ownerPeerId: string;
+  identity: {
+    peerId: string;
+    publicKey: Uint8Array;
+    privateKey: Uint8Array;
+  };
+  runtime: VaultRuntime;
+  getRepo: () => Repo;
+  getIndexes: () => Indexes;
+  /**
+   * Lazy accessors for consent + audit. Both return null until activateVault()
+   * has wired them up. Routes that require them call requireConsent() to
+   * narrow the types.
+   */
+  getConsentState: () => ConsentState | null;
+  getAudit: () => AuditLog | null;
+  selfDisplayName: () => string;
+  getFolderLocal: () => FolderLocal | null;
+  broadcast: (msg: unknown) => void;
+}
 
 export interface Conn {
   send(msg: ServerMessage): void;
@@ -38,45 +94,252 @@ export function makeRouter(deps: BridgeDeps) {
     }
     const msg: ClientMessage = parsed.data;
 
-    switch (msg.kind) {
-      case "capture.text": {
-        const r = await captureText(deps, { text: msg.text, tags: msg.tags });
+    try {
+      return await routeMessage(deps, conn, msg);
+    } catch (err) {
+      const code = msg.kind.replace(/\./g, "-") + "-failed";
+      return {
+        kind: "error",
+        code,
+        message: err instanceof Error ? err.message : String(err),
+      };
+    }
+  };
+}
+
+function requireVaultActive<T>(
+  deps: BridgeDeps,
+  fn: () => Promise<T>
+): Promise<T> {
+  if (!deps.runtime.state) {
+    throw new Error("no-vault: Create or join a Vault first.");
+  }
+  return fn();
+}
+
+function requireConsent(deps: BridgeDeps): {
+  consentState: ConsentState;
+  audit: AuditLog;
+} {
+  const consentState = deps.getConsentState();
+  const audit = deps.getAudit();
+  if (!consentState || !audit) {
+    throw new Error("no-vault: Consent + audit subsystems are not active.");
+  }
+  return { consentState, audit };
+}
+
+async function listEntitiesByKind(
+  repo: Repo,
+  kind: "person" | "place" | "event" | "task"
+) {
+  if (kind === "person") return repo.listPersons();
+  if (kind === "place") return repo.listPlaces();
+  if (kind === "event") return repo.listEvents();
+  return repo.listTasks();
+}
+
+function buildConsentDeps(deps: BridgeDeps): ConsentDeps {
+  const { consentState, audit } = requireConsent(deps);
+  const store = deps.runtime.store;
+  return {
+    swarm: deps.runtime.swarm,
+    consentState,
+    audit,
+    getRepo: deps.getRepo,
+    // The requester id MUST be the autobee writer key — apply() binds the
+    // consentRequest record's requesterPeerId to the writer, and the grant
+    // routes to the writer-key connection. identity.peerId would be silently
+    // dropped by apply() (two-peerId gotcha).
+    selfPeerId: store?.localPeerId ?? deps.identity.peerId,
+    selfDisplayName: deps.selfDisplayName(),
+    appendRecord: async (op: unknown) => {
+      if (!store) throw new Error("vault not active");
+      await store.append(op);
+    },
+    signRecord: (body: unknown) =>
+      store ? signCanonical(body, store.secretKey) : "",
+  };
+}
+
+async function routeMessage(
+  deps: BridgeDeps,
+  conn: Conn,
+  msg: ClientMessage
+): Promise<ServerMessage> {
+  switch (msg.kind) {
+    // ── Vault setup + presence ────────────────────────────────────────
+    case "vault.status": {
+      const r = await vaultRoutes.vaultStatus({
+        fs: deps.fs,
+        identity: deps.identity,
+        runtime: deps.runtime,
+      });
+      return {
+        kind: "vault.status",
+        state: r.state,
+        ...(r.vaultId !== undefined ? { vaultId: r.vaultId } : {}),
+        ...(r.vaultName !== undefined ? { vaultName: r.vaultName } : {}),
+        ...(r.selfPeerId !== undefined ? { selfPeerId: r.selfPeerId } : {}),
+      };
+    }
+    case "vault.create": {
+      const r = await vaultRoutes.vaultCreate(
+        { fs: deps.fs, identity: deps.identity, runtime: deps.runtime },
+        { displayName: msg.displayName }
+      );
+      return { kind: "vault.created", vaultId: r.vaultId, peerId: r.peerId };
+    }
+    case "vault.invite-create": {
+      const r = await vaultRoutes.vaultInviteCreate(
+        { fs: deps.fs, identity: deps.identity, runtime: deps.runtime },
+        {
+          ...(msg.placeholderDisplayName
+            ? { placeholderDisplayName: msg.placeholderDisplayName }
+            : {}),
+          ...(msg.expiresIn ? { expiresIn: msg.expiresIn } : {}),
+        }
+      );
+      return { kind: "invite.token", token: r.token, expiresAt: r.expiresAt };
+    }
+    case "vault.invite-accept": {
+      const r = await vaultRoutes.vaultInviteAccept(
+        { fs: deps.fs, identity: deps.identity, runtime: deps.runtime },
+        { token: msg.token, displayName: msg.displayName }
+      );
+      return { kind: "vault.joined", vaultId: r.vaultId, peerId: r.peerId };
+    }
+    case "peer.list": {
+      const r = await vaultRoutes.peerList({
+        fs: deps.fs,
+        identity: deps.identity,
+        runtime: deps.runtime,
+      });
+      return { kind: "peer.list", peers: r.peers };
+    }
+
+    // ── Content capture + retrieval (require an active vault) ─────────
+    case "capture.text": {
+      return requireVaultActive(deps, async () => {
+        const r = await captureText(
+          {
+            pool: deps.pool,
+            repo: deps.getRepo(),
+            indexes: deps.getIndexes(),
+            workspace: deps.workspace,
+            fs: deps.fs,
+            // Stamp the autobee writer key (same as folders/search/roster),
+            // not identity.peerId, so ownership attribution is consistent.
+            ownerPeerId: deps.runtime.store?.localPeerId ?? deps.ownerPeerId,
+            capturesFolderId:
+              deps.runtime.state?.capturesFolderId ??
+              "01J0CAPTVRES000000000000AA",
+          },
+          { text: msg.text, tags: msg.tags }
+        );
         return {
           kind: "capture.ack",
           memoryId: r.memoryId,
           ...(r.duplicateOf ? { duplicateOf: r.duplicateOf } : {}),
         };
-      }
-      case "capture.audio": {
+      });
+    }
+    case "capture.audio": {
+      return requireVaultActive(deps, async () => {
         const audio = Uint8Array.from(Buffer.from(msg.audioBase64, "base64"));
-        const r = await captureAudio(deps, { audio, tags: msg.tags });
+        const r = await captureAudio(
+          {
+            pool: deps.pool,
+            repo: deps.getRepo(),
+            indexes: deps.getIndexes(),
+            workspace: deps.workspace,
+            fs: deps.fs,
+            // Stamp the autobee writer key (same as folders/search/roster),
+            // not identity.peerId, so ownership attribution is consistent.
+            ownerPeerId: deps.runtime.store?.localPeerId ?? deps.ownerPeerId,
+            capturesFolderId:
+              deps.runtime.state?.capturesFolderId ??
+              "01J0CAPTVRES000000000000AA",
+          },
+          { audio, tags: msg.tags }
+        );
         return {
           kind: "capture.ack",
           memoryId: r.memoryId,
           ...(r.duplicateOf ? { duplicateOf: r.duplicateOf } : {}),
         };
-      }
-      case "search.run": {
+      });
+    }
+    case "search.run": {
+      return requireVaultActive(deps, async () => {
         const filters = msg.filters
           ? {
               ...(msg.filters.tags ? { tags: msg.filters.tags } : {}),
-              ...(msg.filters.createdAfter ? { createdAfter: msg.filters.createdAfter } : {}),
-              ...(msg.filters.createdBefore ? { createdBefore: msg.filters.createdBefore } : {}),
-              ...(msg.filters.personId ? { personId: msg.filters.personId } : {}),
+              ...(msg.filters.createdAfter
+                ? { createdAfter: msg.filters.createdAfter }
+                : {}),
+              ...(msg.filters.createdBefore
+                ? { createdBefore: msg.filters.createdBefore }
+                : {}),
+              ...(msg.filters.personId
+                ? { personId: msg.filters.personId }
+                : {}),
             }
           : undefined;
-        const hits = await runSearch(deps, {
-          query: msg.query,
-          k: msg.k,
-          ...(filters ? { filters } : {}),
-        });
-        // Kick off answer generation in the background; stream chunks via conn.
-        // Defer one microtask so the search.hits reply flushes first; otherwise
-        // the empty-hits branch of streamAnswer could write answer.chunk over
-        // the same socket BEFORE search.hits goes out.
+        // Folder-scoped "summarize this folder" requests can't be answered by
+        // semantic search (the meta-instruction has no content words to match),
+        // so classify intent and, for SUMMARY, pull the folder's documents
+        // directly and synthesize an overview from their per-file summaries.
+        const onlyFolderId =
+          msg.folderIds && msg.folderIds.length === 1 ? msg.folderIds[0]! : null;
+        if (onlyFolderId) {
+          const intent = await classifyAskIntent(deps.pool, msg.query);
+          if (intent === "summary") {
+            const docs = await deps.getRepo().listMemoriesInFolder(onlyFolderId, deps.getIndexes());
+            const requestId = newUlid();
+            queueMicrotask(() => {
+              void streamFolderSummary(deps, conn, requestId, onlyFolderId);
+            });
+            return {
+              kind: "search.hits",
+              hits: docs.slice(0, 8).map((d) => ({
+                memoryId: d.id,
+                score: 1,
+                snippet: d.summary || d.body.slice(0, 200),
+                ...(d.ownerPeerId ? { ownerPeerId: d.ownerPeerId } : {}),
+                tags: d.tags,
+                folderId: onlyFolderId,
+              })),
+            };
+          }
+        }
+        // selfPeerId stamped on hits MUST match the peerId used in the
+        // roster + vault.status reply (= the autobee writer key), so the
+        // web UI can correctly compare h.ownerPeerId against selfPeerId
+        // to suppress "Request access" on the user's own memories.
+        const stampedPeerId =
+          deps.runtime.state?.selfPeerId ?? deps.identity.peerId;
+        const hits = await runSearch(
+          {
+            pool: deps.pool,
+            workspace: deps.workspace,
+            swarm: deps.runtime.swarm,
+            selfPeerId: stampedPeerId,
+            repo: deps.getRepo(),
+            folderLocal: deps.getFolderLocal(),
+            metaLookup: (ids) => deps.getIndexes().metaForMemories(ids),
+          },
+          {
+            query: msg.query,
+            k: msg.k,
+            ...(filters ? { filters } : {}),
+            ...(msg.folderIds ? { folderIds: msg.folderIds } : {}),
+          }
+        );
         const requestId = newUlid();
+        const folderStats = await buildFolderStats(deps, msg.folderIds);
         queueMicrotask(() => {
-          void streamAnswer(deps, conn, requestId, msg.query, hits);
+          void streamAnswer(deps, conn, requestId, msg.query, hits, folderStats);
         });
         return {
           kind: "search.hits",
@@ -86,11 +349,14 @@ export function makeRouter(deps: BridgeDeps) {
             snippet: h.snippet,
             ...(h.ownerPeerId ? { ownerPeerId: h.ownerPeerId } : {}),
             tags: h.tags,
+            ...(h.folderId ? { folderId: h.folderId } : {}),
           })),
         };
-      }
-      case "memory.get": {
-        const m = await getMemory(deps, msg.memoryId as Ulid);
+      });
+    }
+    case "memory.get": {
+      return requireVaultActive(deps, async () => {
+        const m = await getMemory({ repo: deps.getRepo() }, msg.memoryId as Ulid);
         if (!m) {
           return { kind: "error", code: "not-found", message: msg.memoryId };
         }
@@ -105,19 +371,427 @@ export function makeRouter(deps: BridgeDeps) {
             },
           ],
         };
+      });
+    }
+    case "memory.detail-get": {
+      return requireVaultActive(deps, async () => {
+        const m = await deps.getRepo().getMemory(msg.memoryId as Ulid);
+        return {
+          kind: "memory.detail",
+          memory: m
+            ? {
+                memoryId: m.id,
+                summary: m.summary,
+                body: m.body,
+                tags: m.tags,
+                createdAt: m.createdAt,
+                ownerPeerId: m.ownerPeerId,
+                confidence: m.confidence,
+                folderId: m.folderId,
+              }
+            : null,
+        };
+      });
+    }
+    case "memory.list": {
+      return requireVaultActive(deps, async () => {
+        const all = await deps.getRepo().listMemories();
+        // Sort newest first, cap at limit (default 50).
+        const limit = msg.limit ?? 50;
+        const sorted = [...all].sort((a, b) =>
+          b.createdAt.localeCompare(a.createdAt)
+        );
+        const memories = sorted.slice(0, limit).map((m) => ({
+          memoryId: m.id,
+          summary: m.summary,
+          body: m.body,
+          tags: m.tags,
+          createdAt: m.createdAt,
+          ownerPeerId: m.ownerPeerId,
+          confidence: m.confidence,
+          folderId: m.folderId,
+        }));
+        return { kind: "memory.list", memories };
+      });
+    }
+    case "entity.list": {
+      return requireVaultActive(deps, async () => {
+        const repo = deps.getRepo();
+        const items = await listEntitiesByKind(repo, msg.entityKind);
+        return { kind: "entity.results", entityKind: msg.entityKind, items };
+      });
+    }
+    case "entity.get": {
+      return requireVaultActive(deps, async () => {
+        const repo = deps.getRepo();
+        const list = await listEntitiesByKind(repo, msg.entityKind);
+        // Linear scan over the entity list — fine at personal-DAM entity counts.
+        // TODO: add a repo.getEntity(kind, id) point-get if entity counts grow large.
+        const record = list.find((r) => r.id === msg.id) ?? null;
+        const indexes = deps.getIndexes();
+        const from = await indexes.relationshipsFrom(msg.id);
+        const to = await indexes.relationshipsTo(msg.id);
+        return { kind: "entity.detail", entityKind: msg.entityKind, record, from, to };
+      });
+    }
+    case "relationship.list": {
+      return requireVaultActive(deps, async () => {
+        const indexes = deps.getIndexes();
+        const dir = msg.direction ?? "both";
+        const from = dir !== "to" ? await indexes.relationshipsFrom(msg.recordId) : [];
+        const to = dir !== "from" ? await indexes.relationshipsTo(msg.recordId) : [];
+        return { kind: "relationship.results", recordId: msg.recordId, from, to };
+      });
+    }
+    case "memory.reindex": {
+      return requireVaultActive(deps, async () => {
+        const r = await reindexAllMemories({
+          pool: deps.pool,
+          workspace: deps.workspace,
+          // autobee writer key for attribution, matching folder routes
+          ownerPeerId: deps.runtime.store?.localPeerId ?? deps.identity.peerId,
+          getRepo: deps.getRepo,
+          getFolderLocal: deps.getFolderLocal,
+        });
+        return { kind: "memory.reindex", memories: r.memories, embedded: r.embedded, errors: r.errors };
+      });
+    }
+    case "tts.play": {
+      for await (const chunk of streamTts({ pool: deps.pool }, msg.text)) {
+        conn.send({
+          kind: "tts.chunk",
+          requestId: msg.requestId,
+          audioBase64: Buffer.from(chunk).toString("base64"),
+        });
       }
-      case "tts.play": {
-        for await (const chunk of streamTts(deps, msg.text)) {
+      return { kind: "tts.done", requestId: msg.requestId };
+    }
+
+    // ── Consent flow ─────────────────────────────────────────────────
+    case "consent.request": {
+      return requireVaultActive(deps, async () => {
+        const cdeps = buildConsentDeps(deps);
+        const r = await consentRequestRoute(cdeps, {
+          memoryId: msg.memoryId,
+          ownerPeerId: msg.ownerPeerId,
+          scope: msg.scope as Scope,
+        });
+        if (r.status === "expired") {
+          return {
+            kind: "consent.expired",
+            consentRequestId: r.consentRequestId,
+            ...(r.reason ? { reason: r.reason } : {}),
+          };
+        }
+        return { kind: "consent.pending", consentRequestId: r.consentRequestId };
+      });
+    }
+    case "consent.respond": {
+      return requireVaultActive(deps, async () => {
+        const cdeps = buildConsentDeps(deps);
+        await consentRespondRoute(cdeps, {
+          consentRequestId: msg.consentRequestId,
+          decision: msg.decision,
+        });
+        return {
+          kind: "consent.pending",
+          consentRequestId: msg.consentRequestId,
+        };
+      });
+    }
+    case "consent.list-pending": {
+      return requireVaultActive(deps, async () => {
+        const cdeps = buildConsentDeps(deps);
+        const entries = consentListPendingRoute(cdeps);
+        for (const e of entries) {
           conn.send({
-            kind: "tts.chunk",
-            requestId: msg.requestId,
-            audioBase64: Buffer.from(chunk).toString("base64"),
+            kind: "consent.incoming",
+            consentRequestId: e.consentRequestId,
+            requesterPeerId: e.requesterPeerId,
+            requesterDisplayName: e.requesterDisplayName,
+            memoryId: e.memoryId,
+            memoryTitle: e.memoryId,
+            scope: e.scope,
+            expiresAt: e.expiresAt,
           });
         }
-        return { kind: "tts.done", requestId: msg.requestId };
-      }
+        return { kind: "consent.pending", consentRequestId: "list" };
+      });
     }
-  };
+    case "audit.query": {
+      return requireVaultActive(deps, async () => {
+        const { audit } = requireConsent(deps);
+        const opts: {
+          peerId?: string;
+          since?: string;
+          limit?: number;
+        } = {};
+        if (msg.peerId !== undefined) opts.peerId = msg.peerId;
+        if (msg.since !== undefined) opts.since = msg.since;
+        if (msg.limit !== undefined) opts.limit = msg.limit;
+        const events: ConsentEvent[] = [];
+        for await (const ev of audit.list(opts)) events.push(ev);
+        return { kind: "audit.events", events };
+      });
+    }
+    case "admin.member-list": {
+      return requireVaultActive(deps, async () => {
+        if (deps.runtime.state?.role !== "admin") {
+          throw new Error("forbidden: admin role required");
+        }
+        const r = await vaultRoutes.peerList({
+          fs: deps.fs,
+          identity: deps.identity,
+          runtime: deps.runtime,
+        });
+        return {
+          kind: "admin.member-list",
+          members: r.peers.map((p) => ({
+            peerId: p.peerId,
+            displayName: p.displayName,
+            role: p.role,
+          })),
+        };
+      });
+    }
+    case "admin.revoke-member": {
+      return requireVaultActive(deps, async () => {
+        if (deps.runtime.state?.role !== "admin") {
+          throw new Error("forbidden: admin role required");
+        }
+        if (!deps.runtime.store) {
+          throw new Error("vault not active");
+        }
+        const now = new Date().toISOString();
+        const unsigned = {
+          id: newUlid(),
+          createdAt: now,
+          updatedAt: now,
+          ownerPeerId: deps.identity.peerId,
+          provenance: { kind: "user" as const },
+          vaultId: deps.runtime.state.vaultId,
+          targetPeerId: msg.targetPeerId,
+          issuedBy: deps.runtime.state.selfPeerId,
+          effectiveAt: now,
+          ...(msg.reason ? { reason: msg.reason } : {}),
+        };
+        const sig = signCanonical(unsigned, deps.runtime.store.secretKey);
+        await deps.runtime.store.append({
+          kind: "revocation",
+          key: `revocation/${unsigned.id}`,
+          value: { ...unsigned, sig },
+        });
+        await deps.runtime.store.flush();
+        return { kind: "admin.revoke-ack", targetPeerId: msg.targetPeerId };
+      });
+    }
+    case "memory.update-scopes": {
+      return requireVaultActive(deps, async () => {
+        const repo = deps.getRepo();
+        const memory = await repo.getMemory(msg.memoryId as Ulid);
+        if (!memory) {
+          return {
+            kind: "error",
+            code: "not-found",
+            message: msg.memoryId,
+          };
+        }
+        const updated = {
+          ...memory,
+          requestableScopes: msg.requestableScopes,
+          updatedAt: new Date().toISOString(),
+        };
+        await repo.putMemory(updated);
+        return { kind: "capture.ack", memoryId: memory.id };
+      });
+    }
+
+    // ── Folders ──────────────────────────────────────────────────────
+    case "folder.add": {
+      return requireVaultActive(deps, async () => {
+        const fl = deps.getFolderLocal();
+        if (!fl || !deps.runtime.store) {
+          return { kind: "error", code: "no-vault", message: "vault not active" };
+        }
+        const r = await folderRoutes.folderAdd(
+          {
+            fs: deps.fs,
+            folderLocal: fl,
+            getRepo: deps.getRepo,
+            getIndexes: deps.getIndexes,
+            pool: deps.pool,
+            // Folder ownerPeerId MUST be the autobee writer key (store.localPeerId),
+            // not identity.peerId — apply()'s folder gate requires
+            // ownerPeerId === the signing writer, and the folder is signed with
+            // store.secretKey. Mismatch → apply() silently drops the write.
+            ownerPeerId: deps.runtime.store.localPeerId,
+            storeSecretKey: deps.runtime.store.secretKey,
+            broadcast: deps.broadcast,
+            workspace: deps.workspace,
+            flushStore: async () => { if (deps.runtime.store) await deps.runtime.store.flush(); },
+          },
+          { path: msg.path, displayName: msg.displayName, visibility: msg.visibility }
+        );
+        return { kind: "folder.added", folderId: r.folderId, displayName: r.displayName };
+      });
+    }
+    case "folder.list": {
+      return requireVaultActive(deps, async () => {
+        const fl = deps.getFolderLocal();
+        if (!fl) return { kind: "error", code: "no-vault", message: "vault not active" };
+        const r = await folderRoutes.folderList({
+          fs: deps.fs,
+          folderLocal: fl,
+          getRepo: deps.getRepo,
+          getIndexes: deps.getIndexes,
+          pool: deps.pool,
+          ownerPeerId: deps.runtime.store?.localPeerId ?? deps.identity.peerId,
+          storeSecretKey: deps.runtime.store?.secretKey ?? new Uint8Array(64),
+          broadcast: deps.broadcast,
+          workspace: deps.workspace,
+          flushStore: async () => { if (deps.runtime.store) await deps.runtime.store.flush(); },
+        });
+        return { kind: "folder.list", folders: r.folders };
+      });
+    }
+    case "folder.update": {
+      return requireVaultActive(deps, async () => {
+        const fl = deps.getFolderLocal();
+        if (!fl || !deps.runtime.store) {
+          return { kind: "error", code: "no-vault", message: "vault not active" };
+        }
+        const r = await folderRoutes.folderUpdate(
+          {
+            fs: deps.fs, folderLocal: fl, getRepo: deps.getRepo, getIndexes: deps.getIndexes, pool: deps.pool,
+            ownerPeerId: deps.runtime.store.localPeerId, storeSecretKey: deps.runtime.store.secretKey,
+            broadcast: deps.broadcast,
+            workspace: deps.workspace,
+            flushStore: async () => { if (deps.runtime.store) await deps.runtime.store.flush(); },
+          },
+          {
+            folderId: msg.folderId,
+            ...(msg.visibility ? { visibility: msg.visibility } : {}),
+            ...(msg.displayName ? { displayName: msg.displayName } : {}),
+          }
+        );
+        return { kind: "folder.updated", folderId: r.folderId };
+      });
+    }
+    case "folder.delete": {
+      return requireVaultActive(deps, async () => {
+        const fl = deps.getFolderLocal();
+        if (!fl || !deps.runtime.store) {
+          return { kind: "error", code: "no-vault", message: "vault not active" };
+        }
+        const r = await folderRoutes.folderDelete(
+          {
+            fs: deps.fs, folderLocal: fl, getRepo: deps.getRepo, getIndexes: deps.getIndexes, pool: deps.pool,
+            ownerPeerId: deps.runtime.store.localPeerId, storeSecretKey: deps.runtime.store.secretKey,
+            broadcast: deps.broadcast,
+            workspace: deps.workspace,
+            flushStore: async () => { if (deps.runtime.store) await deps.runtime.store.flush(); },
+          },
+          { folderId: msg.folderId }
+        );
+        return { kind: "folder.deleted", folderId: r.folderId };
+      });
+    }
+    case "folder.rescan": {
+      return requireVaultActive(deps, async () => {
+        const fl = deps.getFolderLocal();
+        if (!fl || !deps.runtime.store) {
+          return { kind: "error", code: "no-vault", message: "vault not active" };
+        }
+        await folderRoutes.folderRescan(
+          {
+            fs: deps.fs, folderLocal: fl, getRepo: deps.getRepo, getIndexes: deps.getIndexes, pool: deps.pool,
+            ownerPeerId: deps.runtime.store.localPeerId, storeSecretKey: deps.runtime.store.secretKey,
+            broadcast: deps.broadcast,
+            workspace: deps.workspace,
+            flushStore: async () => { if (deps.runtime.store) await deps.runtime.store.flush(); },
+          },
+          { folderId: msg.folderId }
+        );
+        return { kind: "folder.ingest-progress", folderId: msg.folderId, current: 0, total: 0, phase: "scanning" };
+      });
+    }
+  }
+}
+
+/** Build a one-line folder-stats string ("Sample has 80 files; Acme has 2
+ *  files") for the Ask context, scoped to `folderIds` when provided. Returns
+ *  "" when no folders are in scope. Reuses the folder.list computation. */
+async function buildFolderStats(
+  deps: BridgeDeps,
+  folderIds?: string[]
+): Promise<string> {
+  const fl = deps.getFolderLocal();
+  if (!fl || !deps.runtime.store) return "";
+  try {
+    const { folders } = await folderRoutes.folderList({
+      fs: deps.fs,
+      folderLocal: fl,
+      getRepo: deps.getRepo,
+      getIndexes: deps.getIndexes,
+      pool: deps.pool,
+      ownerPeerId: deps.runtime.store.localPeerId,
+      storeSecretKey: deps.runtime.store.secretKey,
+      broadcast: deps.broadcast,
+      workspace: deps.workspace,
+      flushStore: async () => {
+        if (deps.runtime.store) await deps.runtime.store.flush();
+      },
+    });
+    const allow = folderIds && folderIds.length > 0 ? new Set(folderIds) : null;
+    const scoped = allow ? folders.filter((f) => allow.has(f.folderId)) : folders;
+    if (scoped.length === 0) return "";
+    return scoped
+      .map((f) => `${f.displayName} has ${f.fileCount} files`)
+      .join("; ");
+  } catch {
+    return "";
+  }
+}
+
+async function streamFolderSummary(
+  deps: BridgeDeps,
+  conn: Conn,
+  requestId: string,
+  folderId: string
+): Promise<void> {
+  const docs = await deps.getRepo().listMemoriesInFolder(folderId, deps.getIndexes());
+  if (docs.length === 0) {
+    conn.send({
+      kind: "answer.chunk",
+      requestId,
+      text: "This folder has no indexed files yet.",
+    });
+    conn.send({ kind: "answer.done", requestId, citations: [] });
+    return;
+  }
+  const { context } = buildFolderSummaryContext(
+    docs.map((d) => ({ summary: d.summary, body: d.body }))
+  );
+  const messages: ChatMessage[] = [
+    { role: "system", content: FOLDER_SUMMARY_SYSTEM_PROMPT },
+    { role: "user", content: `File summaries:\n${context}\n\nWrite the folder overview.` },
+  ];
+  try {
+    const text = await complete(deps.pool, messages);
+    conn.send({ kind: "answer.chunk", requestId, text });
+    conn.send({
+      kind: "answer.done",
+      requestId,
+      citations: docs.slice(0, 4).map((d) => ({ memoryId: d.id })),
+    });
+  } catch (err) {
+    conn.send({
+      kind: "error",
+      requestId,
+      code: "answer-failed",
+      message: err instanceof Error ? err.message : "unknown",
+    });
+  }
 }
 
 async function streamAnswer(
@@ -125,9 +799,13 @@ async function streamAnswer(
   conn: Conn,
   requestId: string,
   query: string,
-  hits: readonly SearchHitForAnswer[]
+  hits: readonly SearchHitForAnswer[],
+  folderStats?: string
 ): Promise<void> {
-  if (hits.length === 0) {
+  // Only short-circuit when we have NOTHING to ground an answer in — no
+  // snippets AND no folder stats. With stats but no snippets we still call
+  // the LLM so count/metadata questions ("how many files") get answered.
+  if (hits.length === 0 && !folderStats) {
     conn.send({
       kind: "answer.chunk",
       requestId,
@@ -136,17 +814,18 @@ async function streamAnswer(
     conn.send({ kind: "answer.done", requestId, citations: [] });
     return;
   }
-  const context = hits
-    .slice(0, 4)
-    .map((h, i) => `[${i + 1}] ${h.snippet}`)
-    .join("\n");
+  const userContent = buildAnswerContext({
+    question: query,
+    snippets: hits.map((h) => h.snippet),
+    ...(folderStats ? { folderStats } : {}),
+  });
   const messages: ChatMessage[] = [
     {
       role: "system",
       content:
-        "Answer the user's question grounded ONLY in the provided snippets. Use [1], [2] inline citations.",
+        "Answer the user's question grounded ONLY in the provided snippets and folder context. Use [1], [2] inline citations when you cite a snippet.",
     },
-    { role: "user", content: `Snippets:\n${context}\n\nQuestion: ${query}` },
+    { role: "user", content: userContent },
   ];
   try {
     const text = await complete(deps.pool, messages);

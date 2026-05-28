@@ -5,11 +5,12 @@
     "rootDir": "./src",
     "tsBuildInfoFile": "./dist/.tsbuildinfo"
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "../../tools/types/native-shim.d.ts"],
   "references": [
     { "path": "../net" },
     { "path": "../domain" },
     { "path": "../ai" },
+    { "path": "../ingest" },
     { "path": "../retrieval" },
     { "path": "../sync" }
   ]

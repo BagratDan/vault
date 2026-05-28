@@ -6,12 +6,122 @@ import { ResultCard } from "./components/ResultCard.js";
 import { AnswerCard } from "./components/AnswerCard.js";
 import { FilterControls, type Filters } from "./components/FilterControls.js";
 import { ModelStatus } from "./components/ModelStatus.js";
-import type { Hit, Citation, ClientMessage } from "./types.js";
+import { VaultSetup } from "./components/VaultSetup.js";
+import { PeerList, type Peer } from "./components/PeerList.js";
+import { InviteTokenDisplay } from "./components/InviteTokenDisplay.js";
+import { ToastQueue } from "./components/ToastQueue.js";
+import type { IncomingRequest } from "./components/ConsentToast.js";
+import { AuditScreen, type AuditEvent } from "./components/AuditScreen.js";
+import { AdminPane, type AdminMember } from "./components/AdminPane.js";
+import {
+  useHashRoute,
+  navigate,
+  useFolderRoute,
+  navigateFolder,
+  useRecordRoute,
+  navigateRecord,
+  type RecordKind,
+  type Route,
+} from "./routes.js";
+import { FolderList, type FolderRow } from "./components/FolderList.js";
+import { AddFolderDialog } from "./components/AddFolderDialog.js";
+import { FolderView } from "./components/FolderView.js";
+import { Sidebar } from "./components/Sidebar.js";
+import { EntityList } from "./components/EntityList.js";
+import { RecordDetail } from "./components/RecordDetail.js";
+import type { RelatedEdge } from "./components/RelatedLinks.js";
+import type { Hit, Citation, ClientMessage, RelEdge } from "./types.js";
+
+type EntityKind = "person" | "place" | "event" | "task";
+type EntityRecord = Record<string, unknown>;
+
+/** A memory row as carried by `memory.list` and `memory.detail`. */
+interface MemoryRecord {
+  memoryId: string;
+  summary: string;
+  body: string;
+  tags: string[];
+  createdAt: string;
+  ownerPeerId: string;
+  confidence: number;
+  folderId: string;
+}
+
+/** Safe string read from a record's index signature. */
+function field(r: EntityRecord, key: string): string {
+  const v = r[key];
+  return typeof v === "string" ? v : "";
+}
+
+/** All entity records carry their ULID in the `id` field (see domain baseRecordShape). */
+function entityId(r: EntityRecord): string {
+  return field(r, "id");
+}
+
+/** Human label for an entity record by kind. */
+function entityLabel(kind: EntityKind, r: EntityRecord): string {
+  if (kind === "person") return field(r, "displayName") || entityId(r);
+  if (kind === "place") return field(r, "name") || entityId(r);
+  return field(r, "title") || entityId(r); // event | task
+}
+
+interface RouteHeaderProps {
+  peers: Peer[];
+  selfPeerId: string;
+  connState: "idle" | "loading" | "ready" | "error";
+  inviteToken: { token: string; expiresAt: string } | null;
+  banner: { kind: "info" | "success" | "error"; text: string } | null;
+  onCreateInvite: () => void;
+  onDismissInvite: () => void;
+  onDismissBanner: () => void;
+}
+
+/**
+ * Page header shared by every route. Declared at MODULE scope (not inside App)
+ * so React keeps a stable component type across App re-renders — otherwise its
+ * subtree (incl. PeerList, which holds its own state) would remount each render.
+ */
+function RouteHeader({
+  peers,
+  selfPeerId,
+  connState,
+  inviteToken,
+  banner,
+  onCreateInvite,
+  onDismissInvite,
+  onDismissBanner,
+}: RouteHeaderProps) {
+  return (
+    <>
+      <header className="flex flex-wrap items-center justify-between gap-y-2">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Vault</h1>
+          <p className="text-xs text-slate-400">Local-first, consent-gated memory</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <PeerList peers={peers} selfPeerId={selfPeerId} onCreateInvite={onCreateInvite} />
+          <ModelStatus state={connState} />
+        </div>
+      </header>
+      {inviteToken && (
+        <InviteTokenDisplay
+          token={inviteToken.token}
+          expiresAt={inviteToken.expiresAt}
+          onDismiss={onDismissInvite}
+        />
+      )}
+      {banner && <Banner banner={banner} onDismiss={onDismissBanner} />}
+    </>
+  );
+}
 
 export function App() {
   const [ws, setWs] = useState<WsClient | null>(null);
   const [connState, setConnState] = useState<"idle" | "loading" | "ready" | "error">(
     "idle"
+  );
+  const [vaultStateView, setVaultStateView] = useState<"unknown" | "no-vault" | "admin" | "member">(
+    "unknown"
   );
   const [hits, setHits] = useState<Hit[]>([]);
   const [answer, setAnswer] = useState<{ text: string; citations: Citation[] } | null>(
@@ -23,6 +133,52 @@ export function App() {
     | { kind: "info" | "success" | "error"; text: string }
     | null
   >(null);
+  const [peers, setPeers] = useState<Peer[]>([]);
+  const [selfPeerId, setSelfPeerId] = useState<string>("");
+  const [inviteToken, setInviteToken] = useState<{ token: string; expiresAt: string } | null>(
+    null
+  );
+  const [toasts, setToasts] = useState<IncomingRequest[]>([]);
+  const [granted, setGranted] = useState<Map<string, { scope: string; text: string }>>(new Map());
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
+  const [auditFilter, setAuditFilter] = useState<{ peerId?: string; kind?: string }>({});
+  const [adminMembers, setAdminMembers] = useState<AdminMember[]>([]);
+  const [library, setLibrary] = useState<MemoryRecord[]>([]);
+  const route = useHashRoute();
+  const folderRoute = useFolderRoute();
+  const recordRoute = useRecordRoute();
+  const [entities, setEntities] = useState<Record<EntityKind, EntityRecord[]>>({
+    person: [],
+    place: [],
+    event: [],
+    task: [],
+  });
+  const [detail, setDetail] = useState<
+    | { kind: RecordKind; id: string; record: EntityRecord | null; from: RelEdge[]; to: RelEdge[] }
+    | null
+  >(null);
+  // Full memory record fetched for the open record-detail route. Unlike
+  // `library` (capped at 50 via memory.list), this is point-fetched, so
+  // deep-linked older memories render their full title/body. Keyed by id.
+  const [detailMemory, setDetailMemory] = useState<MemoryRecord | null>(null);
+  const [folders, setFolders] = useState<FolderRow[]>([]);
+  const [addOpen, setAddOpen] = useState(false);
+  const [folderProgress, setFolderProgress] = useState<
+    Record<
+      string,
+      {
+        current: number;
+        total: number;
+        phase: "scanning" | "extracting" | "embedding" | "done";
+        currentFile?: string;
+      }
+    >
+  >({});
+  const toastsRef = useRef<IncomingRequest[]>([]);
+  const pendingScopes = useRef<Array<"metadata" | "snippet" | "file">>([]);
+  useEffect(() => {
+    toastsRef.current = toasts;
+  }, [toasts]);
   const audioQueue = useRef<{ queue: string[]; el: HTMLAudioElement | null }>({
     queue: [],
     el: null,
@@ -41,9 +197,11 @@ export function App() {
         const client = createWsClient({
           url: `ws://${window.location.host}/ws?token=${encodeURIComponent(body.token)}`,
         });
+        client.send({ kind: "vault.status" });
         setWs(client);
         setConnState("ready");
-      } catch {
+      } catch (err) {
+        console.error("[vault] sidecar handshake failed:", err);
         if (!cancelled) setConnState("error");
       }
     })();
@@ -69,8 +227,87 @@ export function App() {
       });
       audioQueue.current.el = el;
     }
-    return ws.onMessage((m) => {
-      if (m.kind === "search.hits") {
+    const unsubscribe = ws.onMessage((m) => {
+      if (m.kind === "vault.status") {
+        setVaultStateView(m.state);
+        if (m.selfPeerId) setSelfPeerId(m.selfPeerId);
+        if (m.state === "admin" || m.state === "member") {
+          ws.send({ kind: "peer.list" });
+          ws.send({ kind: "memory.list" });
+          ws.send({ kind: "folder.list" });
+        }
+      } else if (m.kind === "vault.created" || m.kind === "vault.joined") {
+        ws.send({ kind: "vault.status" });
+        ws.send({ kind: "peer.list" });
+        ws.send({ kind: "memory.list" });
+      } else if (m.kind === "memory.list") {
+        setLibrary(m.memories);
+      } else if (m.kind === "memory.detail") {
+        // Stash the full point-fetched record so deep-linked older memories
+        // (beyond the 50-item library) render their full title/body. The record
+        // carries its own memoryId; detailHeader only uses it when that id
+        // matches the open detail, so a stale reply can't mislabel another memory.
+        if (m.memory) setDetailMemory(m.memory);
+      } else if (m.kind === "entity.results") {
+        setEntities((prev) => ({ ...prev, [m.entityKind]: m.items }));
+      } else if (m.kind === "entity.detail") {
+        // Guard on BOTH kind AND record id: a delayed reply for person A must
+        // not overwrite the now-open person B (same kind). The server message
+        // has no echoed id, but the returned record carries its own.
+        setDetail((prev) =>
+          prev &&
+          prev.kind === m.entityKind &&
+          prev.id === (m.record as { id?: string } | null)?.id
+            ? { ...prev, record: m.record, from: m.from, to: m.to }
+            : prev
+        );
+      } else if (m.kind === "relationship.results") {
+        setDetail((prev) =>
+          prev && prev.id === m.recordId
+            ? { ...prev, from: m.from, to: m.to }
+            : prev
+        );
+      } else if (m.kind === "peer.list") {
+        setPeers(m.peers);
+      } else if (m.kind === "peer.connected") {
+        setPeers((prev) =>
+          prev.some((p) => p.peerId === m.peer.peerId)
+            ? prev
+            : [...prev, { ...m.peer, role: "member" }]
+        );
+      } else if (m.kind === "peer.disconnected") {
+        setPeers((prev) => prev.filter((p) => p.peerId !== m.peerId));
+      } else if (m.kind === "folder.list") {
+        setFolders(m.folders);
+      } else if (m.kind === "folder.added") {
+        ws.send({ kind: "folder.list" });
+        ws.send({ kind: "memory.list" });
+      } else if (m.kind === "folder.ingest-progress") {
+        setFolderProgress((p) => ({
+          ...p,
+          [m.folderId]: {
+            current: m.current,
+            total: m.total,
+            phase: m.phase,
+            ...(m.currentFile ? { currentFile: m.currentFile } : {}),
+          },
+        }));
+      } else if (m.kind === "folder.ingest-done") {
+        const done = m.ingested + m.skipped + m.errors;
+        setFolderProgress((p) => ({
+          ...p,
+          [m.folderId]: { current: done, total: done, phase: "done" },
+        }));
+        ws.send({ kind: "folder.list" });
+        ws.send({ kind: "memory.list" });
+      } else if (m.kind === "folder.updated") {
+        ws.send({ kind: "folder.list" });
+      } else if (m.kind === "folder.deleted") {
+        ws.send({ kind: "folder.list" });
+        ws.send({ kind: "memory.list" });
+      } else if (m.kind === "invite.token") {
+        setInviteToken({ token: m.token, expiresAt: m.expiresAt });
+      } else if (m.kind === "search.hits") {
         setHits(m.hits);
       } else if (m.kind === "capture.ack") {
         setBanner(
@@ -78,9 +315,80 @@ export function App() {
             ? { kind: "info", text: `Duplicate of memory ${m.duplicateOf.slice(0, 8)}` }
             : { kind: "success", text: `Saved memory ${m.memoryId.slice(0, 8)}` }
         );
+        if (!m.duplicateOf && pendingScopes.current.length > 0) {
+          ws.send({
+            kind: "memory.update-scopes",
+            memoryId: m.memoryId,
+            requestableScopes: pendingScopes.current,
+          });
+          pendingScopes.current = [];
+        }
+        // Refresh library list so the new memory appears in the home view.
+        ws.send({ kind: "memory.list" });
       } else if (m.kind === "error") {
         const short = m.message.length > 240 ? m.message.slice(0, 240) + "…" : m.message;
         setBanner({ kind: "error", text: `${m.code}: ${short}` });
+      } else if (m.kind === "consent.incoming") {
+        setToasts((prev) =>
+          prev.some((t) => t.consentRequestId === m.consentRequestId)
+            ? prev
+            : [
+                ...prev,
+                {
+                  consentRequestId: m.consentRequestId,
+                  requesterDisplayName: m.requesterDisplayName,
+                  memoryId: m.memoryId,
+                  memoryTitle: m.memoryTitle,
+                  scope: m.scope,
+                  expiresAt: m.expiresAt,
+                  ...(m.ratePolicy ? { ratePolicy: m.ratePolicy } : {}),
+                },
+              ]
+        );
+      } else if (m.kind === "consent.granted") {
+        let text = "";
+        if (m.scope === "snippet" && m.payload && typeof m.payload === "object" && "text" in m.payload) {
+          text = String((m.payload as { text: string }).text);
+        } else if (m.scope === "metadata" && m.payload && typeof m.payload === "object") {
+          text = JSON.stringify(m.payload);
+        } else if (m.scope === "file" && m.payload && typeof m.payload === "object" && "contentBase64" in m.payload) {
+          try {
+            text = atob(String((m.payload as { contentBase64: string }).contentBase64));
+          } catch {
+            text = "[binary]";
+          }
+        }
+        setHits((prev) => {
+          const updated = [...prev];
+          const t = toastsRef.current.find((x) => x.consentRequestId === m.consentRequestId);
+          if (!t) return updated;
+          const idx = updated.findIndex((h) => h.memoryId === t.memoryId);
+          if (idx >= 0) updated[idx] = { ...updated[idx]!, snippet: text };
+          return updated;
+        });
+        setGranted((prev) => {
+          const next = new Map(prev);
+          const t = toastsRef.current.find((x) => x.consentRequestId === m.consentRequestId);
+          if (t) next.set(t.memoryId, { scope: m.scope, text });
+          return next;
+        });
+        setToasts((prev) => prev.filter((t) => t.consentRequestId !== m.consentRequestId));
+      } else if (m.kind === "consent.denied" || m.kind === "consent.expired") {
+        setToasts((prev) => prev.filter((t) => t.consentRequestId !== m.consentRequestId));
+        if (m.kind === "consent.denied") {
+          setBanner({ kind: "error", text: `Access denied${m.reason ? ` (${m.reason})` : ""}.` });
+        } else {
+          setBanner({ kind: "info", text: `Request expired${m.reason ? ` (${m.reason})` : ""}.` });
+        }
+      } else if (m.kind === "consent.pending") {
+        // Soft ack — no UI action needed.
+      } else if (m.kind === "audit.events") {
+        setAuditEvents(m.events as AuditEvent[]);
+      } else if (m.kind === "admin.member-list") {
+        setAdminMembers(m.members);
+      } else if (m.kind === "admin.revoke-ack") {
+        setBanner({ kind: "success", text: `Revoked ${m.targetPeerId.slice(0, 8)}…` });
+        ws.send({ kind: "admin.member-list" });
       } else if (m.kind === "answer.chunk") {
         setAnswer({ text: m.text, citations: [] });
       } else if (m.kind === "answer.done") {
@@ -100,69 +408,564 @@ export function App() {
         setPlaying(false);
       }
     });
+    return unsubscribe;
   }, [ws]);
 
   const send = (msg: ClientMessage) => ws?.send(msg);
 
-  return (
-    <main className="mx-auto max-w-3xl space-y-5 p-6">
-      <header className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Vault</h1>
+  useEffect(() => {
+    if (route === "audit" && ws) {
+      ws.send({ kind: "audit.query" });
+    }
+  }, [route, ws]);
+
+  useEffect(() => {
+    if (route === "admin" && ws && vaultStateView === "admin") {
+      ws.send({ kind: "admin.member-list" });
+    }
+  }, [route, ws, vaultStateView]);
+
+  // Load the entity list when entering a People/Places/Events/Tasks route.
+  useEffect(() => {
+    if (!ws) return;
+    const entityKind: EntityKind | null =
+      route === "people"
+        ? "person"
+        : route === "places"
+          ? "place"
+          : route === "events"
+            ? "event"
+            : route === "tasks"
+              ? "task"
+              : null;
+    if (entityKind) ws.send({ kind: "entity.list", entityKind });
+  }, [route, ws]);
+
+  // Load a record's detail + relationships when entering a record-detail route.
+  useEffect(() => {
+    if (!ws || !recordRoute) {
+      setDetail(null);
+      setDetailMemory(null);
+      return;
+    }
+    setDetail({ kind: recordRoute.kind, id: recordRoute.id, record: null, from: [], to: [] });
+    setDetailMemory(null);
+    if (recordRoute.kind === "memory") {
+      // Edges are remote; the full memory record may be outside the 50-item
+      // library (memory.list cap), so point-fetch it too.
+      ws.send({ kind: "relationship.list", recordId: recordRoute.id });
+      ws.send({ kind: "memory.detail-get", memoryId: recordRoute.id });
+    } else {
+      ws.send({ kind: "entity.get", entityKind: recordRoute.kind, id: recordRoute.id });
+    }
+  }, [recordRoute?.kind, recordRoute?.id, ws]);
+
+  if (connState !== "ready") {
+    return (
+      <main className="mx-auto flex max-w-3xl flex-col items-center justify-center p-10">
         <ModelStatus state={connState} />
-      </header>
+      </main>
+    );
+  }
 
-      {banner && <Banner banner={banner} onDismiss={() => setBanner(null)} />}
+  if (vaultStateView === "unknown") {
+    return (
+      <main className="mx-auto flex max-w-3xl flex-col items-center justify-center p-10">
+        <p className="text-sm text-slate-400">Loading vault status…</p>
+      </main>
+    );
+  }
 
-      <CapturePane
-        onSubmitText={(text, tags) => send({ kind: "capture.text", text, tags })}
-        onSubmitAudio={(audio, tags) => {
-          let bin = "";
-          for (let i = 0; i < audio.length; i++) bin += String.fromCharCode(audio[i]!);
-          const audioBase64 = btoa(bin);
-          send({ kind: "capture.audio", audioBase64, tags });
-        }}
+  if (vaultStateView === "no-vault") {
+    return (
+      <VaultSetup
+        onCreate={(displayName) => send({ kind: "vault.create", displayName })}
+        onJoin={(token, displayName) => send({ kind: "vault.invite-accept", token, displayName })}
       />
+    );
+  }
 
-      <SearchBar
-        onSubmit={(query) => {
-          setAnswer(null);
-          const msg: ClientMessage =
-            Object.keys(filters).length > 0
-              ? { kind: "search.run", query, k: 8, filters }
-              : { kind: "search.run", query, k: 8 };
-          send(msg);
+  // Resolve a record id to a human label + its kind, using everything loaded so
+  // far (entity lists + library). Falls back to the bare id / "memory" kind.
+  const labelOf = (id: string): { label: string; kind: RecordKind } => {
+    for (const k of ["person", "place", "event", "task"] as const) {
+      const r = entities[k].find((e) => entityId(e) === id);
+      if (r) return { label: entityLabel(k, r), kind: k };
+    }
+    const mem = library.find((m) => m.memoryId === id);
+    if (mem) return { label: mem.summary || id, kind: "memory" };
+    return { label: id, kind: "memory" };
+  };
+
+  // Map server relationship edges (from carry toId, to carry fromId) to the
+  // RelatedLinks shape, resolving the "other" record's label.
+  const edgesToRelated = (from: RelEdge[], to: RelEdge[]): RelatedEdge[] => {
+    const out: RelatedEdge[] = [];
+    for (const e of from) {
+      const otherId = e.toId ?? "";
+      out.push({ relId: e.relId, otherId, otherLabel: labelOf(otherId).label, type: e.type });
+    }
+    for (const e of to) {
+      const otherId = e.fromId ?? "";
+      out.push({ relId: e.relId, otherId, otherLabel: labelOf(otherId).label, type: e.type });
+    }
+    return out;
+  };
+
+  const openRecord = (id: string) => {
+    const { kind } = labelOf(id);
+    navigateRecord(kind, id);
+  };
+
+  const headerProps: RouteHeaderProps = {
+    peers,
+    selfPeerId,
+    connState,
+    inviteToken,
+    banner,
+    onCreateInvite: () => send({ kind: "vault.invite-create" }),
+    onDismissInvite: () => setInviteToken(null),
+    onDismissBanner: () => setBanner(null),
+  };
+
+  let content: React.ReactNode = null;
+
+  if (folderRoute) {
+    const f = folders.find((x) => x.folderId === folderRoute);
+    if (!f) {
+      content = (
+        <main className="mx-auto max-w-3xl p-6">
+          <p className="text-sm text-slate-400">Loading folder…</p>
+          <button
+            type="button"
+            onClick={() => navigate("ask")}
+            className="mt-2 text-xs text-slate-400 hover:text-slate-200"
+          >
+            ← folders
+          </button>
+        </main>
+      );
+    } else {
+    const folderFiles = library
+      .filter((m) => m.folderId === folderRoute)
+      .map((m) => ({
+        memoryId: m.memoryId,
+        summary: m.summary,
+        createdAt: m.createdAt,
+        tags: m.tags,
+      }));
+    const isOwner = f.ownerPeerId === selfPeerId;
+    content = (
+      <FolderView
+        folder={{
+          folderId: f.folderId,
+          displayName: f.displayName,
+          visibility: f.visibility,
+          ownerPeerId: f.ownerPeerId,
+          fileCount: f.fileCount,
+          ...("path" in f && (f as { path?: string }).path
+            ? { path: (f as { path?: string }).path }
+            : {}),
         }}
-      />
-      <FilterControls value={filters} onChange={setFilters} />
-
-      {answer && (
-        <AnswerCard
-          text={answer.text}
-          citations={answer.citations}
-          playing={playing}
-          onPlay={(text) => {
-            setPlaying(true);
-            send({
-              kind: "tts.play",
-              text,
-              requestId: `tts-${Date.now()}`,
-            });
+        isOwner={isOwner}
+        files={folderFiles}
+        ingestProgress={folderProgress[folderRoute] ?? null}
+        onBack={() => navigate("folders")}
+        onRescan={() => send({ kind: "folder.rescan", folderId: folderRoute })}
+        onToggleVisibility={(next) =>
+          send({ kind: "folder.update", folderId: folderRoute, visibility: next })
+        }
+        onDelete={() => {
+          if (
+            window.confirm(
+              "Delete this folder from the vault? The files on your disk are NOT touched."
+            )
+          ) {
+            send({ kind: "folder.delete", folderId: folderRoute });
+            navigate("folders");
+          }
+        }}
+      >
+        <CapturePane
+          onSubmitText={(text, tags, scopes) => {
+            send({ kind: "capture.text", text, tags });
+            pendingScopes.current = scopes;
+          }}
+          onSubmitAudio={(audio, tags, scopes) => {
+            let bin = "";
+            for (let i = 0; i < audio.length; i++) bin += String.fromCharCode(audio[i]!);
+            const audioBase64 = btoa(bin);
+            send({ kind: "capture.audio", audioBase64, tags });
+            pendingScopes.current = scopes;
           }}
         />
-      )}
-
-      <div className="space-y-3">
-        {hits.map((h) => (
-          <ResultCard
-            key={h.memoryId}
-            memoryId={h.memoryId}
-            score={h.score}
-            snippet={h.snippet}
-            tags={h.tags}
+        <section className="rounded-2xl bg-slate-900 p-5 shadow">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-400">
+            Ask (this folder)
+          </h2>
+          <SearchBar
+            onSubmit={(query) => {
+              setAnswer(null);
+              send({ kind: "search.run", query, k: 8, folderIds: [folderRoute] });
+            }}
           />
-        ))}
-      </div>
-    </main>
+          {answer && (
+            <div className="mt-4">
+              <AnswerCard
+                text={answer.text}
+                citations={answer.citations}
+                playing={playing}
+                onPlay={(text) => {
+                  setPlaying(true);
+                  send({ kind: "tts.play", text, requestId: `tts-${Date.now()}` });
+                }}
+              />
+            </div>
+          )}
+          {hits.length > 0 && (
+            <div className="mt-4 space-y-3">
+              {hits.map((h) => {
+                const ownerName = peers.find((p) => p.peerId === h.ownerPeerId)?.displayName;
+                const grant = granted.get(h.memoryId);
+                return (
+                  <ResultCard
+                    key={h.memoryId}
+                    memoryId={h.memoryId}
+                    score={h.score}
+                    snippet={grant ? grant.text : h.snippet}
+                    tags={h.tags}
+                    {...(h.ownerPeerId ? { ownerPeerId: h.ownerPeerId } : {})}
+                    {...(ownerName ? { ownerDisplayName: ownerName } : {})}
+                    fullContentAvailable={!!grant}
+                    {...(h.ownerPeerId && h.ownerPeerId !== selfPeerId
+                      ? {
+                          onRequestAccess: (scope: "metadata" | "snippet" | "file") =>
+                            send({
+                              kind: "consent.request",
+                              memoryId: h.memoryId,
+                              ownerPeerId: h.ownerPeerId!,
+                              scope,
+                            }),
+                        }
+                      : {})}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </section>
+      </FolderView>
+    );
+    }
+  } else if (recordRoute) {
+    content = renderRecordDetail();
+  } else if (route === "audit") {
+    content = (
+      <AuditScreen
+        events={auditEvents.filter(
+          (e) => !auditFilter.kind || e.kind === auditFilter.kind
+        )}
+        selfPeerId={selfPeerId}
+        filter={auditFilter}
+        onFilterChange={(next) => {
+          setAuditFilter(next);
+          send({ kind: "audit.query", ...(next.peerId ? { peerId: next.peerId } : {}) });
+        }}
+        onClose={() => navigate("ask")}
+      />
+    );
+  } else if (route === "admin") {
+    content =
+      vaultStateView !== "admin" ? (
+        <main className="mx-auto max-w-3xl p-6">
+          <p className="text-sm text-rose-300">Admin only.</p>
+          <button
+            type="button"
+            onClick={() => navigate("ask")}
+            className="mt-2 text-xs text-slate-400 hover:text-slate-200"
+          >
+            ← back
+          </button>
+        </main>
+      ) : (
+        <AdminPane
+          members={adminMembers}
+          selfPeerId={selfPeerId}
+          onRevoke={(targetPeerId, reason) => {
+            const payload: { kind: "admin.revoke-member"; targetPeerId: string; reason?: string } = {
+              kind: "admin.revoke-member",
+              targetPeerId,
+            };
+            if (reason) payload.reason = reason;
+            send(payload);
+          }}
+          onViewAccess={(targetPeerId) => {
+            setAuditFilter({ peerId: targetPeerId });
+            send({ kind: "audit.query", peerId: targetPeerId });
+            navigate("audit");
+          }}
+          onClose={() => navigate("ask")}
+        />
+      );
+  } else if (route === "folders") {
+    content = (
+      <main className="mx-auto max-w-3xl space-y-5 p-6">
+        <RouteHeader {...headerProps} />
+        {addOpen && (
+          <AddFolderDialog
+            onCancel={() => setAddOpen(false)}
+            onSubmit={(path, displayName, visibility) => {
+              setAddOpen(false);
+              send({ kind: "folder.add", path, displayName, visibility });
+            }}
+          />
+        )}
+        <FolderList
+          folders={folders}
+          selfPeerId={selfPeerId}
+          onOpen={(folderId) => navigateFolder(folderId)}
+          onAddClick={() => setAddOpen(true)}
+        />
+      </main>
+    );
+  } else if (
+    route === "people" ||
+    route === "places" ||
+    route === "events" ||
+    route === "tasks"
+  ) {
+    const kind: EntityKind =
+      route === "people" ? "person" : route === "places" ? "place" : route === "events" ? "event" : "task";
+    const items = entities[kind].map((r) => ({ id: entityId(r), label: entityLabel(kind, r) }));
+    content = (
+      <main className="mx-auto max-w-3xl space-y-5 p-6">
+        <RouteHeader {...headerProps} />
+        <section className="rounded-2xl bg-slate-900 p-5 shadow">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-400">
+            {route}
+          </h2>
+          <EntityList kind={kind} items={items} onOpen={(id) => navigateRecord(kind, id)} />
+        </section>
+      </main>
+    );
+  } else if (route === "library") {
+    content = (
+      <main className="mx-auto max-w-3xl space-y-5 p-6">
+        <RouteHeader {...headerProps} />
+        <section className="rounded-2xl bg-slate-900 p-5 shadow">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-400">
+            Library
+          </h2>
+          {library.length === 0 ? (
+            <p className="py-8 text-center text-sm text-slate-500">No memories yet.</p>
+          ) : (
+            <ul className="flex flex-col gap-1">
+              {library.map((m) => (
+                <li key={m.memoryId}>
+                  <button
+                    type="button"
+                    className="block w-full cursor-pointer rounded-md px-3 py-2 text-left text-sm text-slate-200 transition-colors duration-150 hover:bg-slate-800 hover:text-[#5eead4] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D9488]"
+                    onClick={() => navigateRecord("memory", m.memoryId)}
+                  >
+                    {m.summary || m.memoryId}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </main>
+    );
+  } else {
+    // route === "ask" — the default landing: quick capture + cross-folder ask.
+    // Captures go to the per-peer Captures folder (server stamps the folderId
+    // from runtime.state.capturesFolderId; the client doesn't pass one).
+    content = (
+      <main className="mx-auto max-w-3xl space-y-5 p-6">
+        <RouteHeader {...headerProps} />
+        <CapturePane
+          onSubmitText={(text, tags, scopes) => {
+            send({ kind: "capture.text", text, tags });
+            pendingScopes.current = scopes;
+          }}
+          onSubmitAudio={(audio, tags, scopes) => {
+            let bin = "";
+            for (let i = 0; i < audio.length; i++) bin += String.fromCharCode(audio[i]!);
+            const audioBase64 = btoa(bin);
+            send({ kind: "capture.audio", audioBase64, tags });
+            pendingScopes.current = scopes;
+          }}
+        />
+        <section className="rounded-2xl bg-slate-900 p-5 shadow">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-400">
+            Ask (across all folders)
+          </h2>
+          <SearchBar
+            onSubmit={(query) => {
+              setAnswer(null);
+              const msg: ClientMessage =
+                Object.keys(filters).length > 0
+                  ? { kind: "search.run", query, k: 8, filters }
+                  : { kind: "search.run", query, k: 8 };
+              send(msg);
+            }}
+          />
+          <div className="mt-3">
+            <FilterControls value={filters} onChange={setFilters} />
+          </div>
+
+          {answer && (
+            <div className="mt-4">
+              <AnswerCard
+                text={answer.text}
+                citations={answer.citations}
+                playing={playing}
+                onPlay={(text) => {
+                  setPlaying(true);
+                  send({
+                    kind: "tts.play",
+                    text,
+                    requestId: `tts-${Date.now()}`,
+                  });
+                }}
+              />
+            </div>
+          )}
+
+          {hits.length > 0 && (
+            <div className="mt-4 space-y-3">
+              {hits.map((h) => {
+                const ownerName = peers.find((p) => p.peerId === h.ownerPeerId)?.displayName;
+                const grant = granted.get(h.memoryId);
+                return (
+                  <ResultCard
+                    key={h.memoryId}
+                    memoryId={h.memoryId}
+                    score={h.score}
+                    snippet={grant ? grant.text : h.snippet}
+                    tags={h.tags}
+                    {...(h.ownerPeerId ? { ownerPeerId: h.ownerPeerId } : {})}
+                    {...(ownerName ? { ownerDisplayName: ownerName } : {})}
+                    fullContentAvailable={!!grant}
+                    {...(h.ownerPeerId && h.ownerPeerId !== selfPeerId
+                      ? {
+                          onRequestAccess: (scope: "metadata" | "snippet" | "file") =>
+                            send({
+                              kind: "consent.request",
+                              memoryId: h.memoryId,
+                              ownerPeerId: h.ownerPeerId!,
+                              scope,
+                            }),
+                        }
+                      : {})}
+                  />
+                );
+              })}
+            </div>
+          )}
+
+          {!answer && hits.length === 0 && (
+            <p className="mt-4 text-xs text-slate-500">
+              Capture a note above or add a folder of files, then ask a question — your local
+              LLM answers from your own notes plus anything peers have shared with you.
+            </p>
+          )}
+        </section>
+      </main>
+    );
+  }
+
+  function renderRecordDetail(): React.ReactNode {
+    if (!detail) {
+      return (
+        <main className="mx-auto max-w-3xl space-y-5 p-6">
+          <RouteHeader {...headerProps} />
+          <p className="py-8 text-center text-sm text-slate-400">Loading record…</p>
+        </main>
+      );
+    }
+    const { title, fields } = detailHeader(detail);
+    const edges = edgesToRelated(detail.from, detail.to);
+    const backRoute: Route =
+      detail.kind === "memory"
+        ? "library"
+        : detail.kind === "person"
+          ? "people"
+          : detail.kind === "place"
+            ? "places"
+            : detail.kind === "event"
+              ? "events"
+              : "tasks";
+    return (
+      <main className="mx-auto max-w-3xl space-y-5 p-6">
+        <RouteHeader {...headerProps} />
+        <section className="rounded-2xl bg-slate-900 p-5 shadow">
+          <button
+            type="button"
+            onClick={() => navigate(backRoute)}
+            className="mb-3 cursor-pointer text-xs text-slate-400 transition-colors duration-150 hover:text-[#5eead4] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D9488]"
+          >
+            ← back
+          </button>
+          <RecordDetail title={title} fields={fields} edges={edges} onOpen={openRecord} />
+        </section>
+      </main>
+    );
+  }
+
+  // Build the title + field rows shown above the relationship links.
+  function detailHeader(d: NonNullable<typeof detail>): {
+    title: string;
+    fields: { label: string; value: string }[];
+  } {
+    if (d.kind === "memory") {
+      // Prefer the point-fetched full record (works for memories beyond the
+      // 50-item library cap), then the library row, then a bare id fallback.
+      const mem =
+        detailMemory && detailMemory.memoryId === d.id
+          ? detailMemory
+          : library.find((m) => m.memoryId === d.id);
+      if (!mem) return { title: d.id, fields: [] };
+      return {
+        title: mem.summary || d.id,
+        fields: [
+          { label: "Created", value: mem.createdAt },
+          ...(mem.tags.length > 0 ? [{ label: "Tags", value: mem.tags.join(", ") }] : []),
+          { label: "Body", value: mem.body },
+        ],
+      };
+    }
+    const r = d.record;
+    if (!r) return { title: d.id, fields: [] };
+    const title = entityLabel(d.kind, r);
+    const fields: { label: string; value: string }[] = [];
+    const aliases = r["aliases"];
+    if (d.kind === "person" && Array.isArray(aliases) && aliases.length > 0) {
+      fields.push({ label: "Aliases", value: (aliases as unknown[]).map(String).join(", ") });
+    }
+    if (d.kind === "event") {
+      if (field(r, "startsAt")) fields.push({ label: "Starts", value: field(r, "startsAt") });
+      if (field(r, "endsAt")) fields.push({ label: "Ends", value: field(r, "endsAt") });
+    }
+    if (d.kind === "task") {
+      if (field(r, "status")) fields.push({ label: "Status", value: field(r, "status") });
+      if (field(r, "dueAt")) fields.push({ label: "Due", value: field(r, "dueAt") });
+    }
+    if (field(r, "createdAt")) fields.push({ label: "Created", value: field(r, "createdAt") });
+    return { title, fields };
+  }
+
+  return (
+    <div className="flex min-h-screen">
+      <Sidebar current={route} onNavigate={navigate} showAdmin={vaultStateView === "admin"} />
+      <div className="min-w-0 flex-1 overflow-x-hidden">{content}</div>
+      <ToastQueue
+        toasts={toasts}
+        onRespond={(consentRequestId, decision) =>
+          send({ kind: "consent.respond", consentRequestId, decision })
+        }
+      />
+    </div>
   );
 }
 

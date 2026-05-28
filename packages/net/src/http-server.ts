@@ -25,6 +25,12 @@ export interface SidecarConnection {
 export interface SidecarServer {
   port: number;
   close: () => Promise<void>;
+  /**
+   * Push a message to every currently-connected WS client. Used for
+   * peer.connected / peer.disconnected events that originate in the
+   * Hyperswarm transport, not in response to a client request.
+   */
+  broadcast: (msg: unknown) => void;
 }
 
 // Numeric loopback only. "localhost" intentionally excluded — it depends on
@@ -40,9 +46,16 @@ export async function createSidecarServer(
     );
   }
 
+  // Browsers use whatever hostname is in the address bar for the Origin header,
+  // so we accept both 127.0.0.1 and localhost variants. The loopback-only bind
+  // (enforced above) is the real isolation; Origin is a defense-in-depth check
+  // against cross-origin browser tabs.
   const allowedOriginsHttp = opts.allowedOrigins ?? [
     `http://${opts.host}:${opts.port}`,
     `http://127.0.0.1:5173`,
+    `http://localhost:5173`,
+    `http://127.0.0.1:${opts.port}`,
+    `http://localhost:${opts.port}`,
   ];
 
   const httpServer = http.createServer((req, res) => {
@@ -98,10 +111,13 @@ export async function createSidecarServer(
       done(true);
     },
   });
+  const liveSockets = new Set<WSConn>();
   wss.on("connection", (socket: WSConn) => {
     let closed = false;
+    liveSockets.add(socket);
     socket.on("close", () => {
       closed = true;
+      liveSockets.delete(socket);
     });
     const conn: SidecarConnection = {
       send: (msg) => {
@@ -119,14 +135,22 @@ export async function createSidecarServer(
       try {
         parsed = JSON.parse(String(raw));
       } catch {
-        conn.send({ error: "invalid-json" });
+        conn.send({
+          kind: "error",
+          code: "invalid-json",
+          message: "WS payload was not valid JSON",
+        });
         return;
       }
       try {
         const reply = await opts.onMessage(parsed, conn);
         conn.send(reply);
       } catch (err) {
-        conn.send({ error: err instanceof Error ? err.message : "unknown" });
+        conn.send({
+          kind: "error",
+          code: "router-threw",
+          message: err instanceof Error ? err.message : String(err),
+        });
       }
     });
   });
@@ -142,6 +166,18 @@ export async function createSidecarServer(
     close: async () => {
       wss.close();
       await new Promise<void>((res) => httpServer.close(() => res()));
+    },
+    broadcast: (msg: unknown) => {
+      const payload = JSON.stringify(msg);
+      for (const s of liveSockets) {
+        if (s.readyState === 1 /* OPEN */) {
+          try {
+            s.send(payload);
+          } catch {
+            // socket may have closed between iteration and send
+          }
+        }
+      }
     },
   };
 }

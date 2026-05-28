@@ -141,6 +141,7 @@ export const ragDeleteWorkspace = async () => undefined;
 
 // Model registry constants — opaque to Vault, only passed to loadModel.
 export const LLAMA_3_2_1B_INST_Q4_0 = { id: "llm" };
+export const QWEN3_4B_INST_Q4_K_M = { id: "llm" };
 export const EMBEDDINGGEMMA_300M_Q4_0 = { id: "emb" };
 export const TTS_EN_ES_CHATTERBOX_Q4F16 = { id: "tts" };
 export const PARAKEET_TDT_ENCODER_INT8 = { id: "p-enc" };

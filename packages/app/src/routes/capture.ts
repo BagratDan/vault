@@ -14,6 +14,7 @@ import {
 import { Repo, Indexes } from "@vault/sync";
 import { Workspace, search } from "@vault/retrieval";
 import { VaultFs } from "../vault-fs.js";
+import { chunkAndEmbed } from "../chunk-embed.js";
 
 export interface CaptureDeps {
   pool: ModelPool;
@@ -22,6 +23,40 @@ export interface CaptureDeps {
   workspace: Workspace;
   fs: VaultFs;
   ownerPeerId: string;
+  /** This peer's "Captures" folder ID — destination for typed captures. */
+  capturesFolderId: string;
+}
+
+/**
+ * Write a single typed relationship edge (memory is always the `from`).
+ * Best-effort per edge: if the record or index write throws (e.g. a shape
+ * failure on a derived entity id), warn and continue rather than aborting the
+ * whole capture — consistent with the "drop per-entity extraction failure"
+ * pattern in extract.ts.
+ */
+async function writeEdge(
+  deps: CaptureDeps,
+  fromId: string,
+  toId: string,
+  type: Relationship["type"]
+): Promise<void> {
+  try {
+    const t = new Date().toISOString();
+    const rel: Relationship = {
+      id: newUlid(),
+      createdAt: t,
+      updatedAt: t,
+      ownerPeerId: deps.ownerPeerId,
+      provenance: { kind: "extraction" },
+      fromId: asUlid(fromId),
+      toId: asUlid(toId),
+      type,
+    };
+    await deps.repo.putRelationship(rel);
+    await deps.indexes.indexRelationship(rel.id, fromId, toId, type);
+  } catch (err) {
+    console.warn(`[vault] dropping edge ${type} ${fromId}->${toId}:`, err);
+  }
 }
 
 export interface CaptureTextInput {
@@ -56,13 +91,23 @@ export async function captureText(
     sourceRecordId: asUlid(src.id),
     text: input.text,
     ownerPeerId: deps.ownerPeerId,
+    folderId: deps.capturesFolderId,
   });
 
-  // 3. Embed the memory body. The same vector is reused for dedup-search
-  //    and for the workspace ingest below, so we only run the embedding
-  //    model once per capture. Loads the model on first call.
+  // 3. Load the embedding model. Used for the dedup query below; the
+  //    workspace indexing happens via chunkAndEmbed (step 7), which embeds
+  //    each chunk under the model's token limit. A best-effort single-shot
+  //    embed of the whole body powers the dedup check — if the body is too
+  //    long for one batch it throws, so we skip dedup (treat as new) rather
+  //    than fail the capture. Chunked indexing in step 7 still makes it
+  //    findable.
   const embedModelId = await ensureEmbedModel(deps.pool);
-  const vector = await embedText(deps.pool, ext.memory.body);
+  let dedupVector: number[] | null = null;
+  try {
+    dedupVector = await embedText(deps.pool, ext.memory.body);
+  } catch {
+    dedupVector = null;
+  }
 
   // 4. Dedup check (spec §9.3 step 6). Query @qvac/rag for the top-1
   //    existing memory matching the new body; if its similarity score is
@@ -71,6 +116,9 @@ export async function captureText(
   const DEDUP_THRESHOLD = 0.92;
   let duplicateOf: string | undefined;
   try {
+    // Skip dedup if the body couldn't be embedded in one shot (too long);
+    // a too-long body is treated as new rather than failing the capture.
+    if (!dedupVector) throw new Error("dedup embed unavailable");
     const hits = await search({
       modelId: embedModelId,
       workspace: deps.workspace.getName(),
@@ -98,13 +146,30 @@ export async function captureText(
     // fall through and ingest as new.
   }
 
-  // 5. Persist all entities
+  // 5. Persist all entities. Typed/audio captures go through the normal
+  //    autobee path (as in Plans 1-3). NOTE: the default "Captures" folder
+  //    is labeled private in the folder list, but capture memories still
+  //    replicate via Autobee like any public-folder memory — their
+  //    confidentiality from peers rests on the per-memory consent gate
+  //    (Plan 3), not on the storage-tier gate. See THREAT_MODEL "At-rest
+  //    replication" for why this is the accepted posture. To keep a capture
+  //    fully node-local, the user puts it in a folder marked private (folder
+  //    ingest routes private-folder memories to the owner-local store).
   await deps.repo.putMemory(ext.memory);
   for (const p of ext.people) await deps.repo.putPerson(p);
   for (const pl of ext.places) await deps.repo.putPlace(pl);
   for (const e of ext.events) await deps.repo.putEvent(e);
   for (const t of ext.tasks) await deps.repo.putTask(t);
   for (const r of ext.externalRefs) await deps.repo.putExternalRef(r);
+
+  // Typed relationship edges (memory is always the `from`). Tasks AND
+  // externalRefs both map to "references" (intentional — see relationshipShape).
+  await writeEdge(deps, ext.memory.id, src.id, "derived-from");
+  for (const p of ext.people) await writeEdge(deps, ext.memory.id, p.id, "mentions");
+  for (const pl of ext.places) await writeEdge(deps, ext.memory.id, pl.id, "located-at");
+  for (const e of ext.events) await writeEdge(deps, ext.memory.id, e.id, "attended-by");
+  for (const t of ext.tasks) await writeEdge(deps, ext.memory.id, t.id, "references");
+  for (const r of ext.externalRefs) await writeEdge(deps, ext.memory.id, r.id, "references");
 
   // 6. Secondary indexes (tags from extraction + user-provided tags merged)
   const allTags = [...ext.memory.tags, ...input.tags];
@@ -114,18 +179,28 @@ export async function captureText(
     ext.people.map((p) => p.id)
   );
 
-  // 7. Save the pre-computed embedding into the @qvac/rag workspace.
-  await deps.workspace.ingest({
-    memoryId: asUlid(ext.memory.id),
-    body: ext.memory.body,
-    tags: ext.memory.tags,
-    embedding: vector,
-    embeddingModelId: embedModelId,
-    metadata: {
-      ownerPeerId: deps.ownerPeerId,
+  // Folder membership + meta side-index. Capture memories use the "Captures"
+  // folder and always go through the autobee putMemory path above, so indexing
+  // here mirrors the autobee storage tier (unlike runIngest, which gates these
+  // by visibility). No visibility guard needed.
+  try {
+    await deps.indexes.indexFolderMembership(ext.memory.folderId, ext.memory.id);
+    await deps.indexes.indexMeta(ext.memory.id, {
+      tags: allTags,
+      ownerPeerId: ext.memory.ownerPeerId,
       createdAt: ext.memory.createdAt,
-    },
-  });
+      personIds: ext.people.map((p) => p.id),
+    });
+  } catch (err) {
+    console.warn(`[vault] dropping folder/meta index for ${ext.memory.id}:`, err);
+  }
+
+  // 7. Chunk + embed so long captures are searchable (a single-shot embed
+  //    of the whole body overflows EmbeddingGemma's 1024-token limit).
+  await chunkAndEmbed(
+    { pool: deps.pool, workspace: deps.workspace, ownerPeerId: deps.ownerPeerId },
+    ext.memory
+  );
 
   return { memoryId: ext.memory.id };
 }

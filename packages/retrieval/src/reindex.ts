@@ -1,4 +1,4 @@
-import { ragReindex } from "@qvac/sdk";
+import { ragReindex, ragIngest } from "@qvac/sdk";
 import type { Ulid } from "@vault/domain";
 
 /** Reindex the workspace. SDK reindex requires a minimum number of
@@ -24,15 +24,30 @@ export interface MemoryForMigration {
   tags: readonly string[];
 }
 
-/** Workspace migration (atomic-pointer-swap pattern) is a Plan-3 feature.
- *  In v1 the migration path is: stop the sidecar, delete the workspace
- *  on disk, restart — the capture pipeline re-ingests on next launch. */
-export async function migrateWorkspace(_input: {
+/** Migrate a workspace by re-ingesting every memory into a fresh workspace.
+ *  Returns the new workspace name for the caller's atomic pointer swap.
+ *  Throws if any memory fails to ingest. */
+export async function migrateWorkspace(input: {
   oldWorkspace: string;
   newWorkspace: string;
+  modelId: string;
   memories: () => AsyncIterable<MemoryForMigration>;
 }): Promise<string> {
-  throw new Error(
-    "migrateWorkspace: not implemented in Plan 1. See README known-limitations."
-  );
+  let count = 0;
+  let failed = 0;
+  for await (const m of input.memories()) {
+    count++;
+    const res = await ragIngest({
+      workspace: input.newWorkspace,
+      modelId: input.modelId,
+      documents: [m.body],
+      chunk: true,
+    });
+    const ok = res.processed.some((p) => p.status === "fulfilled");
+    if (!ok) failed++;
+  }
+  if (failed > 0) {
+    throw new Error(`migrateWorkspace: ${failed} of ${count} memories failed to ingest`);
+  }
+  return input.newWorkspace;
 }
